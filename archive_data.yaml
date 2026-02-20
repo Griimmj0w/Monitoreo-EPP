@@ -1,0 +1,9 @@
+train: ./archive/css-data/train/images
+val: ./archive/css-data/valid/images
+test: ./archive/css-data/test/images
+
+# number of classes
+nc: 10
+
+# class names
+names: ["Hardhat", "Mask", "NO-Hardhat", "NO-Mask", "NO-Safety Vest", "Person", "Safety Cone", "Safety Vest", "machinery", "vehicle"]

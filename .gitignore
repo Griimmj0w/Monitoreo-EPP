@@ -1,0 +1,15 @@
+.venv/
+.venv*/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Training outputs and datasets
+runs/
+archive*/
+
+# Large artifacts
+*.pt
+*.zip
+training_log*.txt

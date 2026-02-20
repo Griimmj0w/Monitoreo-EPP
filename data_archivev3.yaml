@@ -1,0 +1,7 @@
+path: ../archivev3  # dataset root
+train: images/train
+val: images/val
+test: images/test
+
+nc: 4
+names: ["helmet", "vest", "head", "person"]

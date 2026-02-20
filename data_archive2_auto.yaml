@@ -1,0 +1,6 @@
+﻿train: archive2_auto\train\\images
+val: archive2_auto\val\\images
+
+nc: 4
+
+names: ["person", "helmet", "safety vest", "no safety vest"]
