@@ -6,10 +6,10 @@ Aplicación completa de **detección automática de EPP** usando **YOLOv8** con 
 
 Este proyecto implementa un sistema inteligente de monitoreo de **Equipo de Protección Personal (EPP)** en entornos laborales mediante:
 
-1. 🎥 **Detección en Tiempo Real** - YOLOv8 para identificación de personas y EPP
-2. 🏋️ **Entrenamiento Personalizado** - Modelos entrenados con datasets específicos (archivev3, archive2_auto)
-3. 📱 **Interfaz Web** - Dashboard en Streamlit para visualización y análisis
-4. 🚀 **Optimización GPU** - Soporte para entrenamiento y inferencia acelerada con CUDA
+1. 🏋️**Entrenamiento Personalizado** - Modelos entrenados con datasets específicos (archivev3, archive2_auto)
+2. 🚀 **Optimización GPU** - Soporte para entrenamiento y inferencia acelerada con CUDA
+3. 🎥 **Detección en Tiempo Real** - YOLOv8 para identificación de personas y EPP
+4. 📱 **Interfaz Web** - Dashboard en Streamlit para visualización y análisis
 
 **Objeto de Detección:**
 - 🧑 Personas
