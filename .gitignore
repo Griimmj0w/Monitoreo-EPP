@@ -9,6 +9,14 @@ __pycache__/
 runs/
 archive*/
 
+# Keep only the final evaluation artifacts requested
+!runs/
+runs/*
+!runs/eval/
+runs/eval/*
+!runs/eval/core_only_eval2/
+!runs/eval/core_only_eval2/**
+
 # Large artifacts
 *.pt
 *.zip

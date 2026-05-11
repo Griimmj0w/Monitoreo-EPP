@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 
 import streamlit as st
 import cv2
@@ -7,7 +8,7 @@ import os
 
 from core.config import Config, CONFIG
 from core.detector import YoloTracker
-from core.association import split_detections, associate_items_to_persons
+from core.association import split_detections, associate_items_to_persons, iou as bbox_iou
 from core.id_reader import HelmetTagReader
 from core.events import EventManager
 
@@ -17,12 +18,61 @@ st.set_page_config(page_title="Deteccion EPP (YOLOv8)", layout="wide")
 st.title("Deteccion de EPP (Casco + Chaleco) con YOLOv8")
 st.caption("MVP Streamlit: tracking + reglas + identificacion por tag (QR) opcional")
 
+STATUS_OK = "EPP CORRECTO"
+STATUS_NO_EPP = "Sin EPP"
+STATUS_NO_HELMET = "FALTA CASCO"
+STATUS_NO_VEST = "FALTA CHALECO"
+
+# Funcion para detectar camaras disponibles
+@st.cache_data(ttl=60)
+def detect_available_cameras(max_cameras=10):
+    """Detecta las camaras disponibles en el sistema"""
+    available_cameras = []
+    detected_indices = set()
+    
+    # Probar cada indice con el mejor backend para Windows (DSHOW primero)
+    backends_to_try = [("DSHOW", cv2.CAP_DSHOW), ("MSMF", cv2.CAP_MSMF)]
+    
+    for i in range(max_cameras):
+        if i in detected_indices:
+            continue
+            
+        for backend_name, backend in backends_to_try:
+            try:
+                cap = cv2.VideoCapture(i, backend)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret and frame is not None:
+                        # Obtener informacion de la camara
+                        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        fps = int(cap.get(cv2.CAP_PROP_FPS))
+                        
+                        # Determinar tipo de camara basado en el indice
+                        cam_type = "Integrada" if i == 0 else f"USB Externa"
+                        
+                        camera_info = {
+                            "index": i,
+                            "backend": backend_name,
+                            "resolution": f"{width}x{height}",
+                            "fps": fps,
+                            "label": f"Camara {i} - {cam_type} ({backend_name}) - {width}x{height}"
+                        }
+                        available_cameras.append(camera_info)
+                        detected_indices.add(i)
+                        cap.release()
+                        break  # Si funciona con este backend, no probar otros
+                    cap.release()
+            except Exception as e:
+                continue
+    
+    return available_cameras
 
 with st.sidebar:
     st.header("Configuracion")
     model_path = st.text_input(
         "Ruta del modelo YOLOv8 (.pt)",
-        value="runs/detect/runs/train/archive2_auto_exp/weights/best.pt"
+        value="runs/detect/runs/train/css_v28_plus/weights/best.pt"
     )
 
 
@@ -31,30 +81,80 @@ with st.sidebar:
     rstp_url = ""
     video_path = ""
     cam_index = 0
+    cam_backend = "DSHOW"
 
     if source_type == "Webcam":
-        cam_index = st.number_input("indice de camara", min_value=0, max_value=10, value=0, step=1)
-        cam_backend = st.selectbox("Backend camara", ["AUTO", "DSHOW", "MSMF"], index=1)
+        st.markdown("**Deteccion de camaras:**")
+        
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("Buscar camaras disponibles"):
+                st.cache_data.clear()
+        
+        with col_btn2:
+            show_debug = st.checkbox("Modo debug", value=False)
+        
+        available_cameras = detect_available_cameras()
+        
+        if available_cameras:
+            st.success(f"[OK] {len(available_cameras)} camara(s) detectada(s)")
+            
+            # Modo debug: mostrar detalles de todas las camaras
+            if show_debug:
+                st.write("**Camaras encontradas:**")
+                for cam in available_cameras:
+                    st.text(f"Indice: {cam['index']}, Backend: {cam['backend']}, "
+                           f"Res: {cam['resolution']}, FPS: {cam['fps']}")
+            
+            # Crear opciones para el selectbox
+            camera_options = {}
+            for cam in available_cameras:
+                camera_options[cam["label"]] = cam
+            
+            selected_camera_label = st.selectbox(
+                "Seleccionar camara",
+                options=list(camera_options.keys()),
+                help="Indice 0 = Camara integrada | Indice 1+ = Camaras USB/Externas"
+            )
+            
+            selected_cam = camera_options[selected_camera_label]
+            cam_index = selected_cam["index"]
+            cam_backend = selected_cam["backend"]
+            
+            # Mostrar info de la camara seleccionada
+            cam_type_desc = "Camara integrada del laptop" if cam_index == 0 else f"Camara USB externa (puerto {cam_index})"
+            st.info(f">> CAMARA ACTIVA: Indice {cam_index}\n\n"
+                   f"Tipo: {cam_type_desc}\n\n"
+                   f"Backend: {cam_backend}\n\n"
+                   f"Resolucion: {selected_cam['resolution']}\n\n"
+                   f"FPS: {selected_cam['fps']}\n\n"
+                   f"Usa 'Test camara' abajo para verificar cual camara es")
+        else:
+            st.warning("[!] No se detectaron camaras. Configuracion manual:")
+            cam_index = st.number_input("Indice de camara", min_value=0, max_value=10, value=0, step=1)
+            cam_backend = st.selectbox("Backend camara", ["AUTO", "DSHOW", "MSMF"], index=1)
+        
         if st.button("Test camara"):
-            backend = 0
+            st.write(f"Probando camara con indice {cam_index} usando backend {cam_backend}...")
+            backend = cv2.CAP_ANY
             if cam_backend == "DSHOW":
                 backend = cv2.CAP_DSHOW
             elif cam_backend == "MSMF":
                 backend = cv2.CAP_MSMF
-            if backend:
-                cap_test = cv2.VideoCapture(int(cam_index), backend)
-            else:
-                cap_test = cv2.VideoCapture(int(cam_index))
+            
+            cap_test = cv2.VideoCapture(int(cam_index), backend)
 
             ok = cap_test.isOpened()
             frame = None
             if ok:
                 ok, frame = cap_test.read()
             if ok and frame is not None:
-                st.success("Camara OK")
+                cam_desc = "integrada" if cam_index == 0 else f"externa USB (indice {cam_index})"
+                st.success(f"[OK] Camara {cam_desc} funcionando!")
+                st.caption("Si esta NO es la camara correcta, selecciona otra de la lista arriba")
                 st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
             else:
-                st.error("No se pudo leer la camara. Prueba otro indice o backend.")
+                st.error(f"[ERROR] No se pudo leer la camara {cam_index}. Prueba otro indice o backend.")
             cap_test.release()
     elif source_type == "RTSP":
         rstp_url = st.text_input("URL RTSP", value="rtsp://username:password@ip_address:port/stream")
@@ -62,15 +162,44 @@ with st.sidebar:
         video_path = st.text_input("Ruta del video", value="video.mp4")
 
     tracker = st.selectbox("Tracker", ["botsort.yaml", "bytetrack.yaml"])
-    conf = st.slider("Confianza (conf)", 0.05, 0.90, float(Config.DEFAULT_CONF), 0.05)
-    iou = st.slider("IOU NMS,(iou)", 0.10, 0.90, float(Config.DEFAULT_IOU), 0.05)
+    
+    st.markdown("---")
+    st.markdown("**Ajustes de deteccion:**")
+    conf = st.slider("Confianza (conf)", 0.05, 0.90, float(Config.DEFAULT_CONF), 0.05,
+                    help="Menor = detecta mas pero con mas falsos positivos. Mayor = mas preciso pero puede perder objetos")
+    iou = st.slider("IOU NMS,(iou)", 0.10, 0.90, float(Config.DEFAULT_IOU), 0.05,
+                   help="Umbral para eliminar detecciones duplicadas")
 
     min_iou_item = st.slider("Iou minimo item-persona", 0.00, 0.20, float(Config.MIN_IOU_PERSON_ITEM), 0.01)
+    
+    st.markdown("---")
+    st.markdown("**Ajustes de camara (solo Webcam/USB):**")
+    adjust_camera = st.checkbox("Ajustar propiedades de camara", value=False,
+                                help="Permite modificar brillo, contraste, etc. de la camara")
+    
+    cam_brightness = 128
+    cam_contrast = 128
+    cam_saturation = 128
+    cam_auto_exposure = True
+    
+    if adjust_camera and source_type == "Webcam":
+        cam_brightness = st.slider("Brillo", 0, 255, 128,
+                                   help="Ajusta si la imagen esta muy oscura o muy clara")
+        cam_contrast = st.slider("Contraste", 0, 255, 128,
+                                 help="Aumenta la diferencia entre zonas claras y oscuras")
+        cam_saturation = st.slider("Saturacion", 0, 255, 128,
+                                   help="Intensidad de los colores")
+        cam_auto_exposure = st.checkbox("Auto exposicion", value=True,
+                                       help="Dejar que la camara ajuste la exposicion automaticamente")
+    
+    st.markdown("---")
 
     enable_qr = st.checkbox("Leer QR en etiqueta (helmet_tag)", value=False)
     preview_enabled = st.checkbox("Mostrar camara en vivo", value=True)
     show_items_without_person = st.checkbox("Mostrar items sin persona", value=False)
     show_all_dets = st.checkbox("Mostrar todas las detecciones", value=False)
+    show_debug_info = st.checkbox("Mostrar info de debug", value=False,
+                                  help="Muestra estadisticas de deteccion en tiempo real")
 
     cooldown = st.number_input("Cooldown eventos (segundos)", min_value=0.0, max_value=60.0, value=float(Config.EVENT_COOLDOWN_SEC), step=0.5)
     fps_limit = st.number_input("FPS limite", min_value=1, max_value=60, value=10, step=1)
@@ -121,6 +250,8 @@ if "track_to_worker" not in st.session_state:
     st.session_state.track_to_worker = {}
 if "preview_enabled" not in st.session_state:
     st.session_state.preview_enabled = True
+if "track_status" not in st.session_state:
+    st.session_state.track_status = {}
 
 if start:
     st.session_state.running = True
@@ -132,8 +263,33 @@ col1, col2 = st.columns([1.4, 1.0])
 frame_slot = col1.empty()
 table_slot = col2.empty()
 
+# Slot para informacion de debug
+debug_slot = st.empty() if show_debug_info else None
+
 def load_model(path):
     return YoloTracker(path)
+
+def draw_status_box(frame, bbox, label, color, thickness=2):
+    x1, y1, x2, y2 = bbox
+    x1 = max(0, int(x1))
+    y1 = max(0, int(y1))
+    x2 = max(0, int(x2))
+    y2 = max(0, int(y2))
+    cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.6
+    font_thickness = 2
+    (tw, th), baseline = cv2.getTextSize(label, font, font_scale, font_thickness)
+    pad = 4
+    text_x1 = x1
+    text_y1 = max(0, y1 - th - baseline - (pad * 2))
+    text_x2 = min(frame.shape[1] - 1, x1 + tw + (pad * 2))
+    text_y2 = y1
+
+    cv2.rectangle(frame, (text_x1, text_y1), (text_x2, text_y2), color, -1)
+    text_org = (text_x1 + pad, text_y2 - baseline - pad)
+    cv2.putText(frame, label, text_org, font, font_scale, (255, 255, 255), font_thickness, cv2.LINE_AA)
 
 try:
     yolo = load_model(model_path)
@@ -157,19 +313,38 @@ with st.sidebar:
         n = name.lower()
         return any(k in n for k in keywords)
 
+    HELMET_KEYS = ["helmet", "hardhat", "hard hat", "casco"]
+    VEST_KEYS = ["vest", "chaleco"]
+
     def _pick_one(names, keywords, fallback):
         for n in names:
             if _match_any(n, keywords):
                 return n
         return fallback if fallback in names else None
 
+    def _is_negative(name):
+        n = name.lower().replace("_", " ").replace("-", " ")
+        return n.startswith("no ") or n.startswith("sin ")
+
+    def _pick_classes(names, keywords):
+        return [n for n in names if _match_any(n, keywords) and not _is_negative(n)]
+
     cls_person = _pick_one(model_names, ["person", "persona", "worker", "trabajador"], Config.CLASS_PERSON)
     cls_tag = _pick_one(model_names, ["tag", "qr", "label", "etiqueta"], Config.CLASS_TAG)
 
     if model_names:
-        epp_candidates = [n for n in model_names if n not in {cls_person, cls_tag}]
+        # Solo mantener EPPs positivos relevantes (casco y chaleco) y ocultar el resto.
+        all_candidates = [n for n in model_names if n not in {cls_person, cls_tag}]
+
+        helmet_only = _pick_classes(all_candidates, HELMET_KEYS)
+        vest_only = _pick_classes(all_candidates, VEST_KEYS)
+        epp_candidates = list(dict.fromkeys(helmet_only + vest_only))
+
+        # Fallback: si el modelo no tiene clases compatibles, no bloquear la app.
         if not epp_candidates:
-            epp_candidates = model_names
+            epp_candidates = all_candidates if all_candidates else model_names
+            st.warning("No se encontraron clases tipo casco/chaleco en el modelo; mostrando todas las clases disponibles.")
+
         selected_epps = st.multiselect("EPPs a detectar", epp_candidates, default=epp_candidates)
     else:
         st.caption("No se pudieron leer las clases del modelo.")
@@ -184,27 +359,55 @@ with st.sidebar:
         if enable_qr and cls_tag and cls_tag not in filter_classes:
             filter_classes.append(cls_tag)
 
-    def _is_negative(name):
-        n = name.lower().replace("_", " ").replace("-", " ")
-        return n.startswith("no ") or n.startswith("sin ")
+    cls_helmet = _pick_classes(selected_epps, HELMET_KEYS)
+    cls_vest = _pick_classes(selected_epps, VEST_KEYS)
 
-    def _pick_classes(names, keywords):
-        return [n for n in names if _match_any(n, keywords) and not _is_negative(n)]
+    prioritize_positive = st.checkbox("Priorizar clases positivas", value=True)
 
-    cls_helmet = _pick_classes(selected_epps, ["helmet", "hardhat", "hard hat", "casco"])
-    cls_vest = _pick_classes(selected_epps, ["vest", "chaleco"])
+def _suppress_negative_overlaps(dets, positive_names, keywords, iou_thresh=0.2):
+    if not positive_names:
+        return dets
+    pos_boxes = [d["bbox"] for d in dets if d["cls"] in positive_names]
+    if not pos_boxes:
+        return dets
+    filtered = []
+    for d in dets:
+        name = d["cls"]
+        if _is_negative(name) and _match_any(name, keywords):
+            if any(bbox_iou(d["bbox"], pb) >= iou_thresh for pb in pos_boxes):
+                continue
+        filtered.append(d)
+    return filtered
 
 def open_capture():
     if source_type == "Webcam":
-        backend = 0
-        if "cam_backend" in globals():
-            if cam_backend == "DSHOW":
-                backend = cv2.CAP_DSHOW
-            elif cam_backend == "MSMF":
-                backend = cv2.CAP_MSMF
-        if backend:
-            return cv2.VideoCapture(int(cam_index), backend)
-        return cv2.VideoCapture(int(cam_index))
+        backend = cv2.CAP_ANY
+        if cam_backend == "DSHOW":
+            backend = cv2.CAP_DSHOW
+        elif cam_backend == "MSMF":
+            backend = cv2.CAP_MSMF
+        cap = cv2.VideoCapture(int(cam_index), backend)
+        
+        # Aplicar ajustes basicos de camara
+        if cap.isOpened():
+            try:
+                # Intentar configurar resolucion mas alta
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                
+                # Si adjust_camera esta activado, aplicar ajustes personalizados
+                if adjust_camera:
+                    cap.set(cv2.CAP_PROP_BRIGHTNESS, cam_brightness)
+                    cap.set(cv2.CAP_PROP_CONTRAST, cam_contrast)
+                    cap.set(cv2.CAP_PROP_SATURATION, cam_saturation)
+                    if cam_auto_exposure:
+                        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)
+                    else:
+                        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+            except:
+                pass
+        
+        return cap
     if source_type == "RTSP":
         return cv2.VideoCapture(rstp_url)
     return cv2.VideoCapture(video_path)
@@ -216,31 +419,51 @@ if st.session_state.running or st.session_state.preview_enabled:
         st.error("No se pudo abrir la fuente de video. Revisa el indice, permisos o si otra app usa la camara.")
         st.session_state.running = False
         st.session_state.preview_enabled = False
+    else:
+        # Dar tiempo a la camara para inicializar (especialmente USB)
+        time.sleep(0.5)
+        # Leer y descartar los primeros frames (pueden estar vacios)
+        for _ in range(5):
+            cap.read()
 
 last_time = 0.0
 fail_count = 0
+consecutive_fails = 0
 
 while st.session_state.running or st.session_state.preview_enabled:
     ok, frame = cap.read()
-    if not ok:
-        fail_count += 1
-        if fail_count == 1:
-            st.warning("No se pudo leer el frame. Verifique la fuente de video.")
-        if cap is not None:
-            cap.release()
-        time.sleep(0.5)
-        cap = open_capture()
-        if fail_count >= 5:
-            st.error("No se pudo leer el frame despues de varios intentos. Revisa la fuente.")
-            break
+    if not ok or frame is None:
+        consecutive_fails += 1
+        # Solo mostrar warning despues de varios fallos consecutivos
+        if consecutive_fails >= 3:
+            fail_count += 1
+            if fail_count == 1:
+                st.warning("No se pudo leer el frame. Verifique la fuente de video.")
+            if cap is not None:
+                cap.release()
+            time.sleep(0.5)
+            cap = open_capture()
+            # Dar tiempo a reinicializar
+            time.sleep(0.3)
+            # Descartar primeros frames
+            for _ in range(3):
+                cap.read()
+            consecutive_fails = 0
+            if fail_count >= 5:
+                st.error("No se pudo leer el frame despues de varios intentos. Revisa la fuente.")
+                break
         continue
+    
+    # Frame leido exitosamente
     fail_count = 0
+    consecutive_fails = 0
     now = time.time()
     if now - last_time < (1.0 / max(1, fps_limit)):
         continue
     last_time = now
 
     if st.session_state.running:
+        now_ts = time.time()
         class_name_to_id = {}
         if getattr(yolo, "names", None):
             try:
@@ -260,6 +483,37 @@ while st.session_state.running or st.session_state.preview_enabled:
             classes=class_ids if class_ids else None,
         )
 
+        if prioritize_positive:
+            dets = _suppress_negative_overlaps(dets, cls_helmet, HELMET_KEYS)
+            dets = _suppress_negative_overlaps(dets, cls_vest, VEST_KEYS)
+        
+        # Mostrar info de debug si esta habilitado
+        if debug_slot is not None:
+            frame_h, frame_w = frame.shape[:2]
+            
+            # Contar tipos de detecciones
+            det_types = {}
+            for d in dets:
+                cls_name = d["cls"]
+                det_types[cls_name] = det_types.get(cls_name, 0) + 1
+            
+            det_summary = ", ".join([f"{k}: {v}" for k, v in det_types.items()]) if det_types else "Ninguna"
+            
+            debug_info = f"""
+            **Info de Debug - Frame actual:**
+            - Resolucion: {frame_w}x{frame_h}
+            - Total detecciones: {len(dets)}
+            - Detecciones por tipo: {det_summary}
+            - Confianza minima (conf): {conf}
+            - IOU threshold: {iou}
+            - Camara: Indice {cam_index} ({cam_backend})
+            
+            **Sugerencias:**
+            - Si no detecta personas: Baja 'conf' a 0.25-0.30
+            - Si imagen oscura: Activa 'Ajustar propiedades' y sube Brillo
+            """
+            debug_slot.info(debug_info)
+
         persons, helmets, vests, tags = split_detections(dets,
             cls_person,
             cls_helmet,
@@ -276,9 +530,9 @@ while st.session_state.running or st.session_state.preview_enabled:
                 for d in dets:
                     x1, y1, x2, y2 = d["bbox"]
                     label = f'{d["cls"]} {d["conf"]:.2f}'
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 150, 255), 2)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
                     cv2.putText(frame, label, (x1, max(0, y1 - 8)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 150, 255), 2)
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
             for tid, pb, pconfig in persons:
                 matched_helmets = associate_items_to_persons(
@@ -303,69 +557,99 @@ while st.session_state.running or st.session_state.preview_enabled:
                         worker_id = decoded
 
                 if not require_helmet and not require_vest:
-                    status = "EPP OK"
+                    status = STATUS_OK
+                    box_color = (0, 255, 0)
                 elif require_helmet and not require_vest:
-                    status = "EPP OK" if has_helmet else "FALTA CASCO"
+                    status = STATUS_OK if has_helmet else STATUS_NO_HELMET
+                    box_color = (0, 255, 0) if has_helmet else (0, 0, 255)
                 elif require_vest and not require_helmet:
-                    status = "EPP OK" if has_vest else "FALTA CHALECO"
+                    status = STATUS_OK if has_vest else STATUS_NO_VEST
+                    box_color = (0, 255, 0) if has_vest else (0, 0, 255)
                 else:
-                    status = "EPP OK" if has_helmet and has_vest else (
-                        "FALTA CASCO" if (not has_helmet and has_vest) else 
-                        "FALTA CHALECO" if (has_helmet and not has_vest) else
-                        "Sin EPP"
-                    )
+                    if has_helmet and has_vest:
+                        status = STATUS_OK
+                        box_color = (0, 255, 0)
+                    elif not has_helmet and not has_vest:
+                        status = STATUS_NO_EPP
+                        box_color = (0, 0, 255)
+                    else:
+                        status = STATUS_NO_HELMET if not has_helmet else STATUS_NO_VEST
+                        box_color = (0, 165, 255)
 
-                if status != "EPP OK" and events.should_emit(tid):
+                if tid >= 0 and status != STATUS_OK and events.should_emit(tid, status):
                     st.session_state.events.append({
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                         "track_id": tid,
                         "worker_id": worker_id or "",
                         "status": status
                     })
+                if tid >= 0:
+                    st.session_state.track_status[tid] = {
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "track_id": tid,
+                        "worker_id": worker_id or "",
+                        "status": status,
+                        "last_seen": now_ts,
+                    }
 
                 x1, y1, x2, y2 = pb
                 label = f"ID:{tid}"
                 if worker_id:
-                    label += f" Worker:{worker_id}"
+                    label += f" Trabajador:{worker_id}"
                 label += f" {status}"
 
-                ok_color = (0, 255, 0)
-                bad_color = (0, 0, 255)
-                box_color = ok_color if status == "EPP OK" else bad_color
-                cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
-                cv2.putText(frame, label, (x1, max(0, y1 - 8)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 2)
+                draw_status_box(frame, (x1, y1, x2, y2), label, box_color, thickness=2)
 
             if show_items_without_person:
                 for ib, _ in helmets:
                     x1, y1, x2, y2 = ib
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
                     cv2.putText(frame, "casco", (x1, max(0, y1 - 8)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
                 for ib, _ in vests:
                     x1, y1, x2, y2 = ib
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 200, 255), 2)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
                     cv2.putText(frame, "chaleco", (x1, max(0, y1 - 8)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 2)
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
         else:
             for d in dets:
                 x1, y1, x2, y2 = d["bbox"]
                 label = f'{d["cls"]} {d["conf"]:.2f}'
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 150, 255), 2)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
                 cv2.putText(frame, label, (x1, max(0, y1 - 8)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 150, 255), 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
     if st.session_state.running:
-        if len(st.session_state.events) > 0:
-            df = pd.DataFrame(st.session_state.events).tail(200)
+        if st.session_state.track_status:
+            pruned = {
+                tid: v for tid, v in st.session_state.track_status.items()
+                if now_ts - v.get("last_seen", now_ts) <= 3.0
+            }
+            st.session_state.track_status = pruned
+        status_rows = [
+            {k: v for k, v in row.items() if k != "last_seen"}
+            for row in st.session_state.track_status.values()
+        ]
+        if status_rows:
+            df = pd.DataFrame(status_rows).sort_values("track_id")
             table_slot.dataframe(df, use_container_width=True, height=600)
         else:
-            table_slot.info("No hay eventos registrados.")
+            table_slot.info("No hay personas detectadas.")
 
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     if st.session_state.running:
+        # Agregar informacion en el frame
         cv2.putText(rgb, f"Detecciones: {len(dets)}", (10, 24),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(rgb, f"Camara: {cam_index} ({cam_backend})", (10, 54),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        
+        # Mostrar advertencia si no hay detecciones
+        if len(dets) == 0:
+            cv2.putText(rgb, "SIN DETECCIONES - Revisa conf/iluminacion", 
+                       (10, rgb.shape[0] - 20),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+    
     frame_slot.image(rgb, channels="RGB", use_column_width=True)
 
 if cap is not None:
