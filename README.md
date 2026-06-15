@@ -1,4 +1,4 @@
-# Monitoreo de Equipo de Protección Personal (EPP) - Detección con YOLOv8
+sw# Monitoreo de Equipo de Protección Personal (EPP) - Detección con YOLOv8
 
 Aplicación completa de **detección automática de EPP** usando **YOLOv8** con interfaz web en **Streamlit**, entrenamiento en GPU y análisis de resultados en tiempo real.
 
@@ -94,8 +94,7 @@ epp_streamlit_app/
 │   └── *.jpg                           # Resultados de detección
 │
 ├── 📦 ENTORNOS VIRTUALES
-│   ├── .venv/                          # Entorno virtual (si existe)
-│   └── .venv-1/                        # ⭐ Entorno virtual principal
+│   └── .venv/                          # Entorno virtual principal
 │
 ├── 📝 DOCUMENTACIÓN
 │   ├── README.md                       # Este archivo
@@ -135,8 +134,8 @@ epp_streamlit_app/
 .\setup.ps1
 
 # Opción 2: Manual
-python -m venv .venv-1
-.venv-1\Scripts\Activate.ps1
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 pip install --upgrade pip
 pip install -r requirements.txt
 
@@ -192,7 +191,7 @@ python train_yolo.py --data data_archivev3.yaml --epochs 100 --model yolov8n.pt 
 
 ```bash
 # Activar entorno virtual
-.venv-1\Scripts\Activate.ps1
+.venv\Scripts\Activate.ps1
 
 # Iniciar Streamlit
 streamlit run app.py
@@ -377,7 +376,9 @@ chcp 65001 | Out-Null                  # UTF-8 console
 
 | Ruta | Descripción |
 |------|-------------|
-| `.venv-1/` | ⭐ Entorno virtual principal |
+| `.venv/` | Entorno virtual principal |
+
+> Nota: `.venv-1`, `.venv-2`, `.venv311` y `.venv_gpu` son entornos heredados de pruebas anteriores. El flujo recomendado usa solo `.venv`.
 | `archivev3/` | Dataset v3 |
 | `archive2_auto/` | Dataset v2 automatizado |
 | `runs/train/` | Modelos entrenados (salida) |

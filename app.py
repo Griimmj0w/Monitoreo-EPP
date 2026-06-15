@@ -13,10 +13,124 @@ from core.id_reader import HelmetTagReader
 from core.events import EventManager
 
 
-st.set_page_config(page_title="Deteccion EPP (YOLOv8)", layout="wide")
+st.set_page_config(page_title="Monitoreo Inteligente de EPP", layout="wide")
 
-st.title("Deteccion de EPP (Casco + Chaleco) con YOLOv8")
-st.caption("MVP Streamlit: tracking + reglas + identificacion por tag (QR) opcional")
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background:
+            radial-gradient(circle at top, rgba(46, 204, 113, 0.16), transparent 26%),
+            linear-gradient(180deg, #0e1722 0%, #0c1520 45%, #08111a 100%);
+        color: #edf4ff;
+    }
+
+    section[data-testid="stSidebar"] {
+        background: #0b141f;
+        border-right: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    [data-testid="stMainBlockContainer"] {
+        padding-top: 1rem;
+        padding-bottom: 1.5rem;
+    }
+
+    .hero-title {
+        font-size: 2rem;
+        font-weight: 900;
+        letter-spacing: 0.02em;
+        color: #ffffff;
+        text-transform: uppercase;
+        margin-bottom: 0.2rem;
+    }
+
+    .hero-subtitle {
+        font-size: 0.92rem;
+        color: rgba(237, 244, 255, 0.7);
+        margin-bottom: 1rem;
+    }
+
+    .status-banner {
+        border-radius: 18px;
+        padding: 1rem 1.2rem;
+        font-size: 1.35rem;
+        font-weight: 900;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24);
+        margin-bottom: 1rem;
+    }
+
+    .status-ok {
+        background: linear-gradient(90deg, #2ea44f 0%, #1f7a39 100%);
+        color: white;
+    }
+
+    .status-alert {
+        background: linear-gradient(90deg, #d12d34 0%, #a4171d 100%);
+        color: white;
+    }
+
+    .summary-panel, .history-panel, .action-panel {
+        background: rgba(15, 24, 37, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 18px;
+        padding: 1rem 1.05rem;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+    }
+
+    .summary-item {
+        font-size: 1rem;
+        padding: 0.2rem 0;
+        color: rgba(238, 245, 255, 0.95);
+    }
+
+    .summary-item strong {
+        color: #ffffff;
+        font-weight: 800;
+    }
+
+    .history-title {
+        font-size: 0.95rem;
+        font-weight: 800;
+        margin-bottom: 0.7rem;
+        color: rgba(238, 245, 255, 0.9);
+    }
+
+    .history-log {
+        max-height: 260px;
+        overflow-y: auto;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        padding-top: 0.65rem;
+        font-family: Consolas, Monaco, 'Courier New', monospace;
+        font-size: 0.88rem;
+        color: rgba(232, 239, 248, 0.95);
+        white-space: pre-wrap;
+    }
+
+    div.stButton > button {
+        width: 100%;
+        border-radius: 14px;
+        padding: 0.8rem 0.9rem;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: linear-gradient(180deg, #e53137 0%, #b41017 100%);
+        color: white;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
+    }
+
+    div.stButton > button:hover {
+        background: linear-gradient(180deg, #f03a40 0%, #c5131b 100%);
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown('<div class="hero-title">MONITOREO INTELIGENTE DE EPP\'S</div>', unsafe_allow_html=True)
 
 STATUS_OK = "EPP CORRECTO"
 STATUS_NO_EPP = "Sin EPP"
@@ -195,7 +309,7 @@ with st.sidebar:
     st.markdown("---")
 
     enable_qr = st.checkbox("Leer QR en etiqueta (helmet_tag)", value=False)
-    preview_enabled = st.checkbox("Mostrar camara en vivo", value=True)
+    preview_enabled = st.checkbox("Mostrar camara en vivo", value=False)
     show_items_without_person = st.checkbox("Mostrar items sin persona", value=False)
     show_all_dets = st.checkbox("Mostrar todas las detecciones", value=False)
     show_debug_info = st.checkbox("Mostrar info de debug", value=False,
@@ -239,9 +353,6 @@ with st.sidebar:
 
             st.success(f"data_template.yaml escrito. train={train_p} val={val_p} nc={ds_nc}")
 
-start = st.button("INICIAR DETECCION")
-stop = st.button("DETENER DETECCION")
-
 if "running" not in st.session_state:
     st.session_state.running = False
 if "events" not in st.session_state:
@@ -252,12 +363,117 @@ if "preview_enabled" not in st.session_state:
     st.session_state.preview_enabled = True
 if "track_status" not in st.session_state:
     st.session_state.track_status = {}
+if "last_export_path" not in st.session_state:
+    st.session_state.last_export_path = ""
+if "dashboard_state" not in st.session_state:
+    st.session_state.dashboard_state = {}
+
+summary_placeholder = st.empty()
+history_placeholder = st.empty()
+
+st.markdown('<div class="action-panel">', unsafe_allow_html=True)
+start = st.button("Iniciar camara", key="start_camera", use_container_width=True)
+load_media = st.button("Cargar video / imagen", key="load_media", use_container_width=True)
+export_evidence = st.button("Exportar Evidencia", key="export_evidence", use_container_width=True)
+stop = st.button("Detener", key="stop_camera", use_container_width=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
 if start:
     st.session_state.running = True
+    st.session_state.preview_enabled = True
 if stop:
     st.session_state.running = False
-st.session_state.preview_enabled = bool(preview_enabled)
+    st.session_state.preview_enabled = False
+if load_media:
+    if source_type == "Webcam":
+        st.warning("Selecciona 'Iniciar camara' para usar la webcam.")
+    elif source_type == "RTSP" and not rstp_url.strip():
+        st.warning("Ingresa una URL RTSP antes de cargar la fuente.")
+    elif source_type == "Video (archivo)" and not video_path.strip():
+        st.warning("Ingresa la ruta del video antes de cargarlo.")
+    else:
+        st.session_state.running = True
+        st.session_state.preview_enabled = True
+if preview_enabled and not st.session_state.running:
+    st.session_state.preview_enabled = True
+elif not st.session_state.running:
+    st.session_state.preview_enabled = False
+
+def export_events_csv():
+    export_dir = os.path.join("runs", "evidence")
+    os.makedirs(export_dir, exist_ok=True)
+    export_path = os.path.join(export_dir, f"evidence_{time.strftime('%Y%m%d_%H%M%S')}.csv")
+    pd.DataFrame(st.session_state.events).to_csv(export_path, index=False, encoding="utf-8-sig")
+    return export_path
+
+
+def render_summary_panel(state):
+    persons_count = state.get("persons_count", 0)
+    helmet_state = state.get("helmet_state", "N/D")
+    vest_state = state.get("vest_state", "N/D")
+    current_time = state.get("current_time", time.strftime("%H:%M:%S"))
+    overall_status = state.get("overall_status", "ESTADO: ESPERANDO CAMARA")
+    status_class = state.get("status_class", "alert")
+
+    return f"""
+    <div class="status-banner status-{status_class}">{overall_status}</div>
+    <div class="summary-panel">
+        <div class="summary-item"><strong>Personas detectadas:</strong> {persons_count}</div>
+        <div class="summary-item"><strong>Casco:</strong> {helmet_state}</div>
+        <div class="summary-item"><strong>Chaleco:</strong> {vest_state}</div>
+        <div class="summary-item"><strong>Hora:</strong> {current_time}</div>
+    </div>
+    """
+
+
+def render_history_panel(events_list):
+    if not events_list:
+        body = "Sin alertas registradas todavía."
+    else:
+        recent = events_list[-8:]
+        body_lines = []
+        for event in recent:
+            timestamp = event.get("timestamp", "")
+            status = event.get("status", "")
+            worker_id = event.get("worker_id", "")
+            track_id = event.get("track_id", "")
+            line = f"[{timestamp}] Falta: {status}"
+            if worker_id:
+                line += f" | Trabajador: {worker_id}"
+            if track_id != "":
+                line += f" | ID: {track_id}"
+            body_lines.append(line)
+        body = "\n".join(body_lines)
+
+    return f"""
+    <div class="history-panel">
+        <div class="history-title">Historial de alertas</div>
+        <div class="history-log">{body}</div>
+    </div>
+    """
+
+
+if export_evidence:
+    if st.session_state.events:
+        st.session_state.last_export_path = export_events_csv()
+        st.success(f"Evidencia exportada en {st.session_state.last_export_path}")
+    else:
+        st.warning("No hay alertas para exportar.")
+
+summary_placeholder.markdown(
+    render_summary_panel(
+        {
+            "persons_count": 0,
+            "helmet_state": "N/D",
+            "vest_state": "N/D",
+            "current_time": time.strftime("%H:%M:%S"),
+            "overall_status": "ESTADO: ESPERANDO CAMARA",
+            "status_class": "alert",
+        }
+    ),
+    unsafe_allow_html=True,
+)
+history_placeholder.markdown(render_history_panel(st.session_state.events), unsafe_allow_html=True)
 
 col1, col2 = st.columns([1.4, 1.0])
 frame_slot = col1.empty()
@@ -635,6 +851,35 @@ while st.session_state.running or st.session_state.preview_enabled:
             table_slot.dataframe(df, use_container_width=True, height=600)
         else:
             table_slot.info("No hay personas detectadas.")
+
+        persons_count = len(persons)
+        helmet_state = "OK" if not require_helmet or all(len(associate_items_to_persons(pb, helmets, min_iou_item)) > 0 for _, pb, _ in persons) else "FALTA"
+        vest_state = "OK" if not require_vest or all(len(associate_items_to_persons(pb, vests, min_iou_item)) > 0 for _, pb, _ in persons) else "FALTA"
+
+        if persons_count == 0:
+            overall_status = "ESTADO: SIN PERSONAS"
+            status_class = "alert"
+        elif all(row.get("status") == STATUS_OK for row in st.session_state.track_status.values()):
+            overall_status = "ESTADO: CUMPLE EPP CRITICO"
+            status_class = "ok"
+        else:
+            overall_status = "ESTADO: ALERTA EPP CRITICO"
+            status_class = "alert"
+
+        st.session_state.dashboard_state = {
+            "persons_count": persons_count,
+            "helmet_state": helmet_state,
+            "vest_state": vest_state,
+            "current_time": time.strftime("%H:%M:%S"),
+            "overall_status": overall_status,
+            "status_class": status_class,
+        }
+
+        summary_placeholder.markdown(
+            render_summary_panel(st.session_state.dashboard_state),
+            unsafe_allow_html=True,
+        )
+        history_placeholder.markdown(render_history_panel(st.session_state.events), unsafe_allow_html=True)
 
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     if st.session_state.running:

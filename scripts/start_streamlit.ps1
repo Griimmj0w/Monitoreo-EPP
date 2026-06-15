@@ -1,4 +1,4 @@
-$pythonExe = Join-Path -Path (Get-Location) -ChildPath '.venv311\Scripts\python.exe'
+$pythonExe = Join-Path -Path (Get-Location) -ChildPath '.venv\Scripts\python.exe'
 if (-not (Test-Path $pythonExe)) { Write-Error "Python executable not found at $pythonExe"; exit 1 }
 $proc = Start-Process -FilePath $pythonExe -ArgumentList '-m streamlit run app.py --server.headless true --server.port 8501' -WindowStyle Hidden -PassThru
 if ($proc) { Write-Output "Started Streamlit PID $($proc.Id)" } else { Write-Warning 'Start-Process did not return a process object.' }

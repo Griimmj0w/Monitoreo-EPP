@@ -5,4 +5,4 @@ Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLi
 Get-NetTCPConnection -State Listen | Where-Object { $_.LocalPort -ge 8501 -and $_.LocalPort -le 8510 } | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize
 
 # Show python processes from venv311
-Get-Process -Name python -ErrorAction SilentlyContinue | Where-Object { $_.Path -and ($_.Path -like '*\\.venv311\\*') } | Select-Object Id,Path | Format-List
+Get-Process -Name python -ErrorAction SilentlyContinue | Where-Object { $_.Path -and ($_.Path -like '*\\.venv\\*') } | Select-Object Id,Path | Format-List

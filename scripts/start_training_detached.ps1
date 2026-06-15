@@ -59,7 +59,6 @@ $env:PYTHONUTF8 = "1"
 
 # Detectar entorno virtual usado en este proyecto
 $pythonCandidates = @(
-  ".venv-1\Scripts\python.exe",
   ".venv\Scripts\python.exe"
 )
 
@@ -72,7 +71,7 @@ foreach ($candidate in $pythonCandidates) {
 }
 
 if (-not $py) {
-  Write-Host "ERROR: No se encontró python del venv (.venv-1 o .venv)." -ForegroundColor Red
+  Write-Host "ERROR: No se encontró python del venv (.venv)." -ForegroundColor Red
   exit 1
 }
 

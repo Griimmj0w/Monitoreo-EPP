@@ -48,4 +48,4 @@ python -c "import torch; print('cuda_available:', torch.cuda.is_available()); pr
 
 Write-Host ""
 Write-Host "Setup complete." -ForegroundColor Green
-Write-Host "To run the app: streamlit run app.py"
+Write-Host "To run the app: .\\.venv\\Scripts\\Activate.ps1; streamlit run app.py"
