@@ -318,6 +318,17 @@ with st.sidebar:
     cooldown = st.number_input("Cooldown eventos (segundos)", min_value=0.0, max_value=60.0, value=float(Config.EVENT_COOLDOWN_SEC), step=0.5)
     fps_limit = st.number_input("FPS limite", min_value=1, max_value=60, value=10, step=1)
 
+    st.markdown("---")
+    st.markdown("**Tamaño del visor:**")
+    viewer_width = st.slider(
+        "Ancho de la ventana de deteccion (px)",
+        min_value=400,
+        max_value=1200,
+        value=700,
+        step=50,
+        help="Ajusta el ancho de la imagen mostrada sin cambiar la resolucion de deteccion.",
+    )
+
     # Dataset helper: detect 'archive' folder and prepare data yaml
     if os.path.isdir("archive"):
         st.markdown("**Dataset encontrado:** `archive`")
@@ -367,6 +378,17 @@ if "last_export_path" not in st.session_state:
     st.session_state.last_export_path = ""
 if "dashboard_state" not in st.session_state:
     st.session_state.dashboard_state = {}
+
+# Zona principal: deteccion y registro siempre visibles en la parte superior.
+# El control de tamaño modifica la proporcion de las columnas; la imagen se
+# ajusta a su columna para que nunca invada la tabla.
+viewer_col, registry_col = st.columns([viewer_width, 500], gap="large")
+with viewer_col:
+    st.subheader("Deteccion en vivo")
+    frame_slot = st.empty()
+with registry_col:
+    st.subheader("Registro de detecciones")
+    table_slot = st.empty()
 
 summary_placeholder = st.empty()
 history_placeholder = st.empty()
@@ -474,10 +496,6 @@ summary_placeholder.markdown(
     unsafe_allow_html=True,
 )
 history_placeholder.markdown(render_history_panel(st.session_state.events), unsafe_allow_html=True)
-
-col1, col2 = st.columns([1.4, 1.0])
-frame_slot = col1.empty()
-table_slot = col2.empty()
 
 # Slot para informacion de debug
 debug_slot = st.empty() if show_debug_info else None
