@@ -5,6 +5,7 @@ import cv2
 import pandas as pd
 import time
 import os
+import re
 
 from core.config import Config, CONFIG
 from core.detector import YoloTracker
@@ -137,6 +138,72 @@ STATUS_NO_EPP = "Sin EPP"
 STATUS_NO_HELMET = "FALTA CASCO"
 STATUS_NO_VEST = "FALTA CHALECO"
 
+VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".wmv", ".m4v"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+
+def safe_upload_name(filename):
+    base = os.path.basename(filename or "archivo")
+    base = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("._")
+    return base or "archivo"
+
+
+def media_kind(path):
+    ext = os.path.splitext(path or "")[1].lower()
+    if ext in IMAGE_EXTENSIONS:
+        return "image"
+    if ext in VIDEO_EXTENSIONS:
+        return "video"
+    return "unknown"
+
+
+class StaticImageCapture:
+    """Pequeno adaptador para procesar una imagen como si fuera una fuente de video."""
+
+    def __init__(self, path):
+        self.frame = cv2.imread(path)
+        self._served = False
+
+    def isOpened(self):
+        return self.frame is not None
+
+    def read(self):
+        if self.frame is None or self._served:
+            return False, None
+        self._served = True
+        return True, self.frame.copy()
+
+    def release(self):
+        pass
+
+
+def resize_for_inference(frame, max_width):
+    if not max_width or max_width <= 0:
+        return frame, 1.0, 1.0
+    height, width = frame.shape[:2]
+    if width <= max_width:
+        return frame, 1.0, 1.0
+    scale = max_width / float(width)
+    resized = cv2.resize(frame, (int(width * scale), int(height * scale)), interpolation=cv2.INTER_AREA)
+    return resized, width / float(resized.shape[1]), height / float(resized.shape[0])
+
+
+def scale_detections(dets, scale_x, scale_y):
+    if scale_x == 1.0 and scale_y == 1.0:
+        return dets
+    scaled = []
+    for det in dets:
+        x1, y1, x2, y2 = det["bbox"]
+        item = dict(det)
+        item["bbox"] = (
+            int(x1 * scale_x),
+            int(y1 * scale_y),
+            int(x2 * scale_x),
+            int(y2 * scale_y),
+        )
+        scaled.append(item)
+    return scaled
+
 # Funcion para detectar camaras disponibles
 @st.cache_data(ttl=60)
 def detect_available_cameras(max_cameras=10):
@@ -190,7 +257,7 @@ with st.sidebar:
     )
 
 
-    source_type = st.selectbox("Fuente", ["Webcam", "RTSP", "Video (archivo)"])
+    source_type = st.selectbox("Fuente", ["Webcam", "RTSP", "Video / imagen (archivo)"])
 
     rstp_url = ""
     video_path = ""
@@ -273,7 +340,28 @@ with st.sidebar:
     elif source_type == "RTSP":
         rstp_url = st.text_input("URL RTSP", value="rtsp://username:password@ip_address:port/stream")
     else:
-        video_path = st.text_input("Ruta del video", value="video.mp4")
+        uploaded_media = st.file_uploader(
+            "Subir video o imagen",
+            type=[ext.lstrip(".") for ext in sorted(VIDEO_EXTENSIONS | IMAGE_EXTENSIONS)],
+            help="Puedes subir un video grabado o una imagen para probar la deteccion de EPP.",
+        )
+        if uploaded_media is not None:
+            upload_dir = os.path.join("runs", "uploads")
+            os.makedirs(upload_dir, exist_ok=True)
+            safe_name = safe_upload_name(uploaded_media.name)
+            video_path = os.path.join(upload_dir, safe_name)
+            with open(video_path, "wb") as fh:
+                fh.write(uploaded_media.getbuffer())
+            st.session_state.uploaded_media_path = video_path
+            st.success(f"Archivo cargado: {safe_name}")
+
+        saved_upload = st.session_state.get("uploaded_media_path", "")
+        default_media_path = saved_upload if saved_upload else "video.mp4"
+        video_path = st.text_input(
+            "O escribe la ruta del video / imagen",
+            value=default_media_path,
+            help="Ejemplo: C:\\videos\\prueba.mp4 o una imagen .jpg/.png",
+        )
 
     tracker = st.selectbox("Tracker", ["botsort.yaml", "bytetrack.yaml"])
     
@@ -317,6 +405,20 @@ with st.sidebar:
 
     cooldown = st.number_input("Cooldown eventos (segundos)", min_value=0.0, max_value=60.0, value=float(Config.EVENT_COOLDOWN_SEC), step=0.5)
     fps_limit = st.number_input("FPS limite", min_value=1, max_value=60, value=10, step=1)
+    process_every_n = st.number_input(
+        "Procesar cada N frames",
+        min_value=1,
+        max_value=10,
+        value=2,
+        step=1,
+        help="Mayor valor = video mas fluido y avance mas rapido, pero menos frames analizados.",
+    )
+    inference_width = st.select_slider(
+        "Ancho maximo de inferencia",
+        options=[320, 480, 640, 800, 960, 1280],
+        value=640,
+        help="Menor valor = mas velocidad. Si pierdes cascos/chalecos pequenos, subelo a 800 o 960.",
+    )
 
     st.markdown("---")
     st.markdown("**Tamaño del visor:**")
@@ -378,6 +480,8 @@ if "last_export_path" not in st.session_state:
     st.session_state.last_export_path = ""
 if "dashboard_state" not in st.session_state:
     st.session_state.dashboard_state = {}
+if "uploaded_media_path" not in st.session_state:
+    st.session_state.uploaded_media_path = ""
 
 # Zona principal: deteccion y registro siempre visibles en la parte superior.
 # El control de tamaño modifica la proporcion de las columnas; la imagen se
@@ -411,8 +515,12 @@ if load_media:
         st.warning("Selecciona 'Iniciar camara' para usar la webcam.")
     elif source_type == "RTSP" and not rstp_url.strip():
         st.warning("Ingresa una URL RTSP antes de cargar la fuente.")
-    elif source_type == "Video (archivo)" and not video_path.strip():
-        st.warning("Ingresa la ruta del video antes de cargarlo.")
+    elif source_type == "Video / imagen (archivo)" and not video_path.strip():
+        st.warning("Sube un archivo o ingresa la ruta del video / imagen antes de cargarlo.")
+    elif source_type == "Video / imagen (archivo)" and not os.path.isfile(video_path.strip()):
+        st.warning("No se encontro el archivo. Revisa la ruta o vuelve a subirlo.")
+    elif source_type == "Video / imagen (archivo)" and media_kind(video_path.strip()) == "unknown":
+        st.warning("Formato no reconocido. Usa video mp4/avi/mov/mkv/wmv/m4v o imagen jpg/png/bmp/webp.")
     else:
         st.session_state.running = True
         st.session_state.preview_enabled = True
@@ -644,7 +752,10 @@ def open_capture():
         return cap
     if source_type == "RTSP":
         return cv2.VideoCapture(rstp_url)
-    return cv2.VideoCapture(video_path)
+    selected_path = video_path.strip()
+    if media_kind(selected_path) == "image":
+        return StaticImageCapture(selected_path)
+    return cv2.VideoCapture(selected_path)
 
 cap = None
 if st.session_state.running or st.session_state.preview_enabled:
@@ -663,10 +774,16 @@ if st.session_state.running or st.session_state.preview_enabled:
 last_time = 0.0
 fail_count = 0
 consecutive_fails = 0
+frame_index = 0
 
 while st.session_state.running or st.session_state.preview_enabled:
     ok, frame = cap.read()
     if not ok or frame is None:
+        if source_type == "Video / imagen (archivo)":
+            st.info("Se termino de procesar el archivo cargado.")
+            st.session_state.running = False
+            st.session_state.preview_enabled = False
+            break
         consecutive_fails += 1
         # Solo mostrar warning despues de varios fallos consecutivos
         if consecutive_fails >= 3:
@@ -686,6 +803,9 @@ while st.session_state.running or st.session_state.preview_enabled:
             if fail_count >= 5:
                 st.error("No se pudo leer el frame despues de varios intentos. Revisa la fuente.")
                 break
+        continue
+    frame_index += 1
+    if st.session_state.running and process_every_n > 1 and (frame_index % int(process_every_n)) != 0:
         continue
     
     # Frame leido exitosamente
@@ -708,14 +828,16 @@ while st.session_state.running or st.session_state.preview_enabled:
         if filter_inference and filter_classes and class_name_to_id:
             class_ids = [class_name_to_id[n] for n in filter_classes if n in class_name_to_id]
 
+        inference_frame, scale_x, scale_y = resize_for_inference(frame, int(inference_width))
         dets = yolo.infer(
-            frame,
+            inference_frame,
             conf=float(conf),
             iou=float(iou),
             tracker=tracker,
             persist=True,
             classes=class_ids if class_ids else None,
         )
+        dets = scale_detections(dets, scale_x, scale_y)
 
         if prioritize_positive:
             dets = _suppress_negative_overlaps(dets, cls_helmet, HELMET_KEYS)
@@ -740,7 +862,9 @@ while st.session_state.running or st.session_state.preview_enabled:
             - Detecciones por tipo: {det_summary}
             - Confianza minima (conf): {conf}
             - IOU threshold: {iou}
-            - Camara: Indice {cam_index} ({cam_backend})
+            - Fuente: {source_type if source_type != "Webcam" else f"Camara indice {cam_index} ({cam_backend})"}
+            - Procesando cada {int(process_every_n)} frame(s)
+            - Ancho inferencia: {int(inference_width)} px
             
             **Sugerencias:**
             - Si no detecta personas: Baja 'conf' a 0.25-0.30
@@ -904,7 +1028,8 @@ while st.session_state.running or st.session_state.preview_enabled:
         # Agregar informacion en el frame
         cv2.putText(rgb, f"Detecciones: {len(dets)}", (10, 24),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(rgb, f"Camara: {cam_index} ({cam_backend})", (10, 54),
+        source_label = f"Camara: {cam_index} ({cam_backend})" if source_type == "Webcam" else "Archivo cargado"
+        cv2.putText(rgb, source_label, (10, 54),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         
         # Mostrar advertencia si no hay detecciones

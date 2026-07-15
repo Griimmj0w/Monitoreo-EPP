@@ -9,7 +9,7 @@ class AppConfig:
     CLASS_TAG: str = "tag"
 
 
-    MIN_IOU_PERSON_ITEM: float = 0.2  # casco/chaleco dentro de persona iou minimo
+    MIN_IOU_PERSON_ITEM: float = 0.05  # casco/chaleco cerca o dentro de persona
     MIN_IOU_TAG_PERSON: float = 0.2   # etiqueta con casco/persona
 
     DEFAULT_CONF: float = 0.25

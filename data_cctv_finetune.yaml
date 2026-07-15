@@ -1,0 +1,7 @@
+train: datasets/cctv_epp/train/images
+val: datasets/cctv_epp/valid/images
+test: datasets/cctv_epp/test/images
+
+nc: 10
+
+names: ["Hardhat","Mask","NO-Hardhat","NO-Mask","NO-Safety Vest","Person","Safety Cone","Safety Vest","machinery","vehicle"]
