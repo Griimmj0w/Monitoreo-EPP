@@ -447,5 +447,5 @@ Proyecto de uso comercial/industrial. Uso sujeto a cumplimiento de regulaciones 
 
 **Last Updated:** 20 Febrero 2026  
 **Versión:** 1.0 (Initial Release)  
-**Status:** ✅ En producción
+**Status:** Prototipo experimental / MVP de investigación
 
