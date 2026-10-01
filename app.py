@@ -5,13 +5,28 @@ import cv2
 import pandas as pd
 import time
 import os
-import re
 
-from core.config import Config, CONFIG
+from core.config import Config
 from core.detector import YoloTracker
-from core.association import split_detections, associate_items_to_persons, iou as bbox_iou
+from core.association import split_detections, associate_items_to_persons
+from core.epp_logic import (
+    HELMET_KEYS,
+    VEST_KEYS,
+    pick_classes as _pick_classes,
+    pick_one as _pick_one,
+    suppress_negative_overlaps,
+)
 from core.id_reader import HelmetTagReader
 from core.events import EventManager
+from core.media import (
+    IMAGE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    StaticImageCapture,
+    media_kind,
+    resize_for_inference,
+    safe_upload_name,
+    scale_detections,
+)
 
 
 st.set_page_config(page_title="Monitoreo Inteligente de EPP", layout="wide")
@@ -137,72 +152,6 @@ STATUS_OK = "EPP CORRECTO"
 STATUS_NO_EPP = "Sin EPP"
 STATUS_NO_HELMET = "FALTA CASCO"
 STATUS_NO_VEST = "FALTA CHALECO"
-
-VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".wmv", ".m4v"}
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-
-
-def safe_upload_name(filename):
-    base = os.path.basename(filename or "archivo")
-    base = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("._")
-    return base or "archivo"
-
-
-def media_kind(path):
-    ext = os.path.splitext(path or "")[1].lower()
-    if ext in IMAGE_EXTENSIONS:
-        return "image"
-    if ext in VIDEO_EXTENSIONS:
-        return "video"
-    return "unknown"
-
-
-class StaticImageCapture:
-    """Pequeno adaptador para procesar una imagen como si fuera una fuente de video."""
-
-    def __init__(self, path):
-        self.frame = cv2.imread(path)
-        self._served = False
-
-    def isOpened(self):
-        return self.frame is not None
-
-    def read(self):
-        if self.frame is None or self._served:
-            return False, None
-        self._served = True
-        return True, self.frame.copy()
-
-    def release(self):
-        pass
-
-
-def resize_for_inference(frame, max_width):
-    if not max_width or max_width <= 0:
-        return frame, 1.0, 1.0
-    height, width = frame.shape[:2]
-    if width <= max_width:
-        return frame, 1.0, 1.0
-    scale = max_width / float(width)
-    resized = cv2.resize(frame, (int(width * scale), int(height * scale)), interpolation=cv2.INTER_AREA)
-    return resized, width / float(resized.shape[1]), height / float(resized.shape[0])
-
-
-def scale_detections(dets, scale_x, scale_y):
-    if scale_x == 1.0 and scale_y == 1.0:
-        return dets
-    scaled = []
-    for det in dets:
-        x1, y1, x2, y2 = det["bbox"]
-        item = dict(det)
-        item["bbox"] = (
-            int(x1 * scale_x),
-            int(y1 * scale_y),
-            int(x2 * scale_x),
-            int(y2 * scale_y),
-        )
-        scaled.append(item)
-    return scaled
 
 # Funcion para detectar camaras disponibles
 @st.cache_data(ttl=60)
@@ -651,26 +600,6 @@ with st.sidebar:
     except Exception:
         model_names = []
 
-    def _match_any(name, keywords):
-        n = name.lower()
-        return any(k in n for k in keywords)
-
-    HELMET_KEYS = ["helmet", "hardhat", "hard hat", "casco"]
-    VEST_KEYS = ["vest", "chaleco"]
-
-    def _pick_one(names, keywords, fallback):
-        for n in names:
-            if _match_any(n, keywords):
-                return n
-        return fallback if fallback in names else None
-
-    def _is_negative(name):
-        n = name.lower().replace("_", " ").replace("-", " ")
-        return n.startswith("no ") or n.startswith("sin ")
-
-    def _pick_classes(names, keywords):
-        return [n for n in names if _match_any(n, keywords) and not _is_negative(n)]
-
     cls_person = _pick_one(model_names, ["person", "persona", "worker", "trabajador"], Config.CLASS_PERSON)
     cls_tag = _pick_one(model_names, ["tag", "qr", "label", "etiqueta"], Config.CLASS_TAG)
 
@@ -705,21 +634,6 @@ with st.sidebar:
     cls_vest = _pick_classes(selected_epps, VEST_KEYS)
 
     prioritize_positive = st.checkbox("Priorizar clases positivas", value=True)
-
-def _suppress_negative_overlaps(dets, positive_names, keywords, iou_thresh=0.2):
-    if not positive_names:
-        return dets
-    pos_boxes = [d["bbox"] for d in dets if d["cls"] in positive_names]
-    if not pos_boxes:
-        return dets
-    filtered = []
-    for d in dets:
-        name = d["cls"]
-        if _is_negative(name) and _match_any(name, keywords):
-            if any(bbox_iou(d["bbox"], pb) >= iou_thresh for pb in pos_boxes):
-                continue
-        filtered.append(d)
-    return filtered
 
 def open_capture():
     if source_type == "Webcam":
@@ -840,8 +754,8 @@ while st.session_state.running or st.session_state.preview_enabled:
         dets = scale_detections(dets, scale_x, scale_y)
 
         if prioritize_positive:
-            dets = _suppress_negative_overlaps(dets, cls_helmet, HELMET_KEYS)
-            dets = _suppress_negative_overlaps(dets, cls_vest, VEST_KEYS)
+            dets = suppress_negative_overlaps(dets, cls_helmet, HELMET_KEYS)
+            dets = suppress_negative_overlaps(dets, cls_vest, VEST_KEYS)
         
         # Mostrar info de debug si esta habilitado
         if debug_slot is not None:
