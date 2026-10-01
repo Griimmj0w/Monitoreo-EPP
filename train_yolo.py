@@ -1,4 +1,4 @@
-"""Small helper to train a YOLOv8 model using the ultralytics package.
+r"""Small helper to train a YOLOv8 model using the ultralytics package.
 
 Usage:
     .venv\Scripts\python.exe train_yolo.py --data data_template.yaml --epochs 50 --model yolov8n.pt

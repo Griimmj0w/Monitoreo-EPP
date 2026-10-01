@@ -84,7 +84,7 @@ Objetivo inicial:
 Desde PowerShell, dentro del proyecto:
 
 ```powershell
-.\.venv311\Scripts\pip.exe install labelImg pyqt5 lxml
+.\.venv\Scripts\pip.exe install labelImg pyqt5 lxml
 ```
 
 ### Abrir viendo errores
@@ -92,13 +92,13 @@ Desde PowerShell, dentro del proyecto:
 No abrir con doble clic. Ejecutar desde PowerShell para ver el error si se cierra:
 
 ```powershell
-.\.venv311\Scripts\python.exe -m labelImg
+.\.venv\Scripts\python.exe -m labelImg
 ```
 
 Si ese comando falla, probar:
 
 ```powershell
-.\.venv311\Scripts\labelImg.exe
+.\.venv\Scripts\labelImg.exe
 ```
 
 ### Configurar formato YOLO
@@ -139,7 +139,7 @@ Probar estos pasos en orden.
 ### Paso 1: Ejecutarlo desde consola
 
 ```powershell
-.\.venv311\Scripts\python.exe -m labelImg
+.\.venv\Scripts\python.exe -m labelImg
 ```
 
 Si se cierra, PowerShell debe mostrar el error real.
@@ -147,22 +147,22 @@ Si se cierra, PowerShell debe mostrar el error real.
 ### Paso 2: Reinstalar dependencias
 
 ```powershell
-.\.venv311\Scripts\pip.exe uninstall -y labelImg pyqt5 pyqt5-qt5 pyqt5-sip
-.\.venv311\Scripts\pip.exe install labelImg pyqt5==5.15.10 lxml
+.\.venv\Scripts\pip.exe uninstall -y labelImg pyqt5 pyqt5-qt5 pyqt5-sip
+.\.venv\Scripts\pip.exe install labelImg pyqt5==5.15.10 lxml
 ```
 
 Luego abrir:
 
 ```powershell
-.\.venv311\Scripts\python.exe -m labelImg
+.\.venv\Scripts\python.exe -m labelImg
 ```
 
 ### Paso 3: Ejecutar desde Python 3.11
 
-El proyecto tiene `.venv311`, usar siempre:
+El proyecto tiene `.venv`, usar siempre:
 
 ```powershell
-.\.venv311\Scripts\python.exe -m labelImg
+.\.venv\Scripts\python.exe -m labelImg
 ```
 
 Evitar mezclar con `.venv` si tiene otra version de Python.
@@ -265,19 +265,19 @@ Ejemplo con 300 imagenes:
 Cuando el dataset este dividido:
 
 ```powershell
-.\.venv311\Scripts\python.exe train_yolo.py --data data_cctv_finetune.yaml --epochs 80 --model runs/detect/runs/train/css_v28_plus/weights/best.pt --imgsz 960 --batch 8 --name cctv_cam9_finetune
+.\.venv\Scripts\python.exe train_yolo.py --data data_cctv_finetune.yaml --epochs 80 --model runs/detect/runs/train/css_v28_plus/weights/best.pt --imgsz 960 --batch 8 --name cctv_cam9_finetune
 ```
 
 Si falta memoria GPU:
 
 ```powershell
-.\.venv311\Scripts\python.exe train_yolo.py --data data_cctv_finetune.yaml --epochs 80 --model runs/detect/runs/train/css_v28_plus/weights/best.pt --imgsz 640 --batch 8 --name cctv_cam9_finetune
+.\.venv\Scripts\python.exe train_yolo.py --data data_cctv_finetune.yaml --epochs 80 --model runs/detect/runs/train/css_v28_plus/weights/best.pt --imgsz 640 --batch 8 --name cctv_cam9_finetune
 ```
 
 O:
 
 ```powershell
-.\.venv311\Scripts\python.exe train_yolo.py --data data_cctv_finetune.yaml --epochs 80 --model runs/detect/runs/train/css_v28_plus/weights/best.pt --imgsz 960 --batch 4 --name cctv_cam9_finetune
+.\.venv\Scripts\python.exe train_yolo.py --data data_cctv_finetune.yaml --epochs 80 --model runs/detect/runs/train/css_v28_plus/weights/best.pt --imgsz 960 --batch 4 --name cctv_cam9_finetune
 ```
 
 ## 10. Usar el modelo entrenado

@@ -112,19 +112,19 @@ epp_streamlit_app/
 
 ## 🛠️ Tecnologías Utilizadas
 
-- **Python** 3.11+
+- **Python** 3.13
 - **YOLOv8** - Detección de objetos (ultralytics)
 - **Streamlit** - Interfaz web interactiva
 - **PyTorch** - Framework deep learning (con soporte CUDA)
 - **OpenCV** - Procesamiento de imágenes
 - **NumPy, Pandas** - Análisis de datos
-- **GPU Support** - NVIDIA CUDA 12.1+, GPU Quadro P4000 (8GB VRAM)
+- **GPU Support** - NVIDIA GTX 1050 Ti (4GB VRAM), driver 582.x, PyTorch wheels cu124
 
 ## 📋 Requisitos
 
 ### Sistema Operativo
 - **Windows 10/11** (PowerShell)
-- **Python 3.11** (recomendado)
+- **Python 3.13** (recomendado)
 - **GPU NVIDIA** con soporte CUDA (opcional pero recomendado para entrenamiento)
 
 ### Instalación Rápida
