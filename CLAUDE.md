@@ -23,7 +23,9 @@ con YOLOv8, tracking y una app web en Streamlit.
 
 - Fuentes de video: webcam, archivo de video/imagen, RTSP (básico).
 - Tracking: BoT-SORT / ByteTrack vía `model.track()`.
-- EPP objetivo final: **helmet, vest, gloves** (guantes aún no implementado).
+- EPP objetivo final: **helmet, vest, gloves**. Los guantes están **en pausa**
+  (poca visibilidad en el video CCTV de la demo); el foco actual es casco+chaleco.
+  El pipeline v4 (`scripts/pseudo_label_v4.py`) tiene flag `--with-gloves` para reactivarlos.
 - La evaluación de cumplimiento es **por persona**, asociando cada EPP a la
   persona detectada. No depender de clases negativas (`NO-*`, `Sin *`).
 - El próximo dataset debe normalizarse a: `person, helmet, vest, gloves`.
