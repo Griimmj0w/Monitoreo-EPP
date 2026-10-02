@@ -20,6 +20,9 @@ class AppConfig:
     TEMPORAL_WINDOW: int = 7    # frames de historial para confirmar un estado
     TEMPORAL_REQUIRED: int = 5  # repeticiones minimas del estado en la ventana
 
+    MIN_PERSON_CONF: float = 0.30  # confianza minima para evaluar a una persona
+                                   # (evita alarmas por detecciones fantasma)
+
 config = AppConfig()
 
 # Backwards-compatible names expected by app.py

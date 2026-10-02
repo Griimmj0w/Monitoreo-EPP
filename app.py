@@ -810,7 +810,13 @@ while st.session_state.running or st.session_state.preview_enabled:
                     cv2.putText(frame, label, (x1, max(0, y1 - 8)),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
-            for tid, pb, pconfig in persons:
+            for tid, pb, pconf in persons:
+                # Solo se evaluan personas con confianza suficiente:
+                # las detecciones fantasma de persona producen falsas
+                # alarmas de EPP (no hay items que asociarles).
+                if pconf < float(Config.MIN_PERSON_CONF):
+                    continue
+
                 matched_helmets = associate_items_to_persons(
                     pb, helmets, min_iou_item)
                 matched_vests = associate_items_to_persons(
