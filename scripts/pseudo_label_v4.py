@@ -151,7 +151,7 @@ def main():
         "",
         f"nc: {len(names)}",
         "",
-        "names: " + ", ".join(f'\"{n}\"' for n in names),
+        "names: [" + ", ".join(f'"{n}"' for n in names) + "]",
     ]
     (out_dir / "data_cctv_v4.yaml").write_text("\n".join(yaml_lines), encoding="utf-8")
 

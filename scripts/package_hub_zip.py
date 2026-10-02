@@ -38,7 +38,7 @@ def main():
         "",
         "nc: 3",
         "",
-        'names: "person", "helmet", "vest"',
+        'names: ["person", "helmet", "vest"]',
     ]
     yaml_text = "\n".join(yaml_lines) + "\n"
 
