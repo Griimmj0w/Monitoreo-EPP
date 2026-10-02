@@ -17,7 +17,7 @@ from core.epp_logic import (
     suppress_negative_overlaps,
 )
 from core.id_reader import HelmetTagReader
-from core.events import EventManager
+from core.events import EventManager, TemporalConfirmer
 from core.media import (
     IMAGE_EXTENSIONS,
     VIDEO_EXTENSIONS,
@@ -202,7 +202,7 @@ with st.sidebar:
     st.header("Configuracion")
     model_path = st.text_input(
         "Ruta del modelo YOLOv8 (.pt)",
-        value="runs/detect/runs/train/css_v28_plus/weights/best.pt"
+        value="exp.pt"
     )
 
 
@@ -590,6 +590,10 @@ except Exception as e:
 
 tag_reader = HelmetTagReader()
 events = EventManager(cooldown_sec=float(cooldown))
+confirmer = TemporalConfirmer(
+    window=int(Config.TEMPORAL_WINDOW),
+    required=int(Config.TEMPORAL_REQUIRED),
+)
 
 with st.sidebar:
     st.markdown("**EPPs a detectar**")
@@ -848,19 +852,36 @@ while st.session_state.running or st.session_state.preview_enabled:
                         status = STATUS_NO_HELMET if not has_helmet else STATUS_NO_VEST
                         box_color = (0, 165, 255)
 
-                if tid >= 0 and status != STATUS_OK and events.should_emit(tid, status):
+                # Confirmacion temporal: el estado solo cuenta si se repite
+                # en al menos TEMPORAL_REQUIRED de los ultimos TEMPORAL_WINDOW
+                # frames, para no alertar por parpadeo de deteccion.
+                if tid >= 0:
+                    effective_status = confirmer.update(tid, status)
+                    if effective_status is None:
+                        effective_status = STATUS_OK
+                else:
+                    effective_status = status
+
+                if effective_status == STATUS_OK:
+                    box_color = (0, 255, 0)
+                elif effective_status in (STATUS_NO_HELMET, STATUS_NO_VEST):
+                    box_color = (0, 165, 255)
+                else:
+                    box_color = (0, 0, 255)
+
+                if tid >= 0 and effective_status != STATUS_OK and events.should_emit(tid, effective_status):
                     st.session_state.events.append({
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                         "track_id": tid,
                         "worker_id": worker_id or "",
-                        "status": status
+                        "status": effective_status
                     })
                 if tid >= 0:
                     st.session_state.track_status[tid] = {
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                         "track_id": tid,
                         "worker_id": worker_id or "",
-                        "status": status,
+                        "status": effective_status,
                         "last_seen": now_ts,
                     }
 
@@ -868,7 +889,7 @@ while st.session_state.running or st.session_state.preview_enabled:
                 label = f"ID:{tid}"
                 if worker_id:
                     label += f" Trabajador:{worker_id}"
-                label += f" {status}"
+                label += f" {effective_status}"
 
                 draw_status_box(frame, (x1, y1, x2, y2), label, box_color, thickness=2)
 
@@ -898,6 +919,7 @@ while st.session_state.running or st.session_state.preview_enabled:
                 if now_ts - v.get("last_seen", now_ts) <= 3.0
             }
             st.session_state.track_status = pruned
+        confirmer.prune(set(st.session_state.track_status))
         status_rows = [
             {k: v for k, v in row.items() if k != "last_seen"}
             for row in st.session_state.track_status.values()
@@ -909,8 +931,9 @@ while st.session_state.running or st.session_state.preview_enabled:
             table_slot.info("No hay personas detectadas.")
 
         persons_count = len(persons)
-        helmet_state = "OK" if not require_helmet or all(len(associate_items_to_persons(pb, helmets, min_iou_item)) > 0 for _, pb, _ in persons) else "FALTA"
-        vest_state = "OK" if not require_vest or all(len(associate_items_to_persons(pb, vests, min_iou_item)) > 0 for _, pb, _ in persons) else "FALTA"
+        current_statuses = [v.get("status") for v in st.session_state.track_status.values()]
+        helmet_state = "OK" if not require_helmet or not any(s in (STATUS_NO_HELMET, STATUS_NO_EPP) for s in current_statuses) else "FALTA"
+        vest_state = "OK" if not require_vest or not any(s in (STATUS_NO_VEST, STATUS_NO_EPP) for s in current_statuses) else "FALTA"
 
         if persons_count == 0:
             overall_status = "ESTADO: SIN PERSONAS"

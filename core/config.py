@@ -17,6 +17,9 @@ class AppConfig:
 
     EVENT_COOLDOWN_SEC: float = 5.0    #no spamear eventos por persona
 
+    TEMPORAL_WINDOW: int = 7    # frames de historial para confirmar un estado
+    TEMPORAL_REQUIRED: int = 5  # repeticiones minimas del estado en la ventana
+
 config = AppConfig()
 
 # Backwards-compatible names expected by app.py
