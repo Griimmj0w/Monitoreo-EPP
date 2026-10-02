@@ -9,11 +9,15 @@ Mapeo de clases (modelo css_v28_plus -> dataset v4):
 Las etiquetas generadas son un punto de partida que luego se corrige
 manualmente (LabelImg / makesense.ai), agregando los guantes.
 
+El split es TEMPORAL (no aleatorio): los frames se ordenan por su indice
+dentro del video y se reparten train/val/test en bloques cronologicos
+continuos, para evitar fuga entre frames adyacentes del mismo video.
+
 Ejemplo:
     .venv\\Scripts\\python.exe scripts\\pseudo_label_v4.py --images datasets/cctv_epp/raw_frames --out datasets/cctv_epp_v4
 """
 import argparse
-import random
+import re
 import shutil
 from pathlib import Path
 
@@ -32,7 +36,6 @@ def parse_args():
     p.add_argument("--conf", type=float, default=0.25)
     p.add_argument("--iou", type=float, default=0.5)
     p.add_argument("--device", default="0", help="0 para GPU, cpu para CPU")
-    p.add_argument("--seed", type=int, default=42)
     p.add_argument("--train", type=float, default=0.7)
     p.add_argument("--val", type=float, default=0.2)
     p.add_argument("--test", type=float, default=0.1)
@@ -76,7 +79,14 @@ def main():
     images = sorted(p for p in images_dir.rglob("*") if p.suffix.lower() in IMAGE_EXTS)
     if not images:
         raise SystemExit("No images found in --images")
-    random.Random(args.seed).shuffle(images)
+
+    # Split temporal: ordenar por indice de frame dentro del video y repartir
+    # en bloques cronologicos continuos (train -> val -> test).
+    def frame_index(p: Path) -> int:
+        m = re.search(r"_(\d+)\.[A-Za-z0-9]+$", p.name)
+        return int(m.group(1)) if m else 0
+
+    images = sorted(images, key=frame_index)
 
     n_total = len(images)
     n_train = int(n_total * args.train)
