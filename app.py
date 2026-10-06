@@ -282,7 +282,7 @@ with st.sidebar:
                 cam_desc = "integrada" if cam_index == 0 else f"externa USB (indice {cam_index})"
                 st.success(f"[OK] Camara {cam_desc} funcionando!")
                 st.caption("Si esta NO es la camara correcta, selecciona otra de la lista arriba")
-                st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
+                st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB", width="stretch")
             else:
                 st.error(f"[ERROR] No se pudo leer la camara {cam_index}. Prueba otro indice o backend.")
             cap_test.release()
@@ -925,7 +925,7 @@ while st.session_state.running or st.session_state.preview_enabled:
         ]
         if status_rows:
             df = pd.DataFrame(status_rows).sort_values("track_id")
-            table_slot.dataframe(df, use_container_width=True, height=600)
+            table_slot.dataframe(df, width="stretch", height=600)
         else:
             table_slot.info("No hay personas detectadas.")
 
@@ -974,7 +974,7 @@ while st.session_state.running or st.session_state.preview_enabled:
                        (10, rgb.shape[0] - 20),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
     
-    frame_slot.image(rgb, channels="RGB", use_column_width=True)
+    frame_slot.image(rgb, channels="RGB", width="stretch")
 
 if cap is not None:
     cap.release()
