@@ -6,7 +6,7 @@ Aplicación completa de **detección automática de EPP** usando **YOLOv8** con 
 
 Este proyecto implementa un sistema inteligente de monitoreo de **Equipo de Protección Personal (EPP)** en entornos laborales mediante:
 
-1. 🏋️**Entrenamiento Personalizado** - Modelos entrenados con datasets específicos (archivev3, archive2_auto)
+1. 🏋️**Entrenamiento Personalizado** - Modelos fine-tuned con dataset propio (cctv_epp_v4) y Ultralytics HUB
 2. 🚀 **Optimización GPU** - Soporte para entrenamiento y inferencia acelerada con CUDA
 3. 🎥 **Detección en Tiempo Real** - YOLOv8 para identificación de personas y EPP
 4. 📱 **Interfaz Web** - Dashboard en Streamlit para visualización y análisis
@@ -38,40 +38,29 @@ epp_streamlit_app/
 │   └── setup.ps1                       # Script de instalación (Windows)
 │
 ├── 🤖 MODELOS Y ENTRENAMIENTOS
-│   ├── train_archivev3_gpu.py          # Entrenamiento GPU con archivev3
-│   ├── train_archivev3.py              # Entrenamiento CPU con archivev3
-│   ├── train_yolo.py                   # Trainer genérico flexible
+│   ├── train_yolo.py                   # Trainer genérico (local)
 │   ├── yolov8n.pt                      # Modelo YOLOv8 nano base
-│   ├── best.pt                         # Mejor modelo entrenado (checkpoint)
-│   └── yolo26n.pt                      # Modelo alternativo
+│   ├── best.pt                         # Modelo baseline histórico (10 clases)
+│   └── exp-2.pt                        # Modelo vigente (v4: person/helmet/vest)
 │
 ├── 📊 DATOS Y CONFIGURACIÓN
-│   ├── data_archivev3.yaml             # Config dataset archivev3
-│   ├── data_archive2_auto.yaml         # Config dataset archive2_auto
-│   ├── data_combined.yaml              # Config dataset combinado
-│   ├── data_template.yaml              # Template para nuevos datasets
-│   └── archive_data.yaml               # Config generalizada
+│   ├── datasets/cctv_epp_v4/           # Dataset v4 activo (train/val/test + yaml)
+│   ├── scripts/pseudo_label_v4.py      # Pseudo-etiquetado + split temporal
+│   ├── scripts/package_hub_zip.py      # Empaquetado para Ultralytics HUB
+│   └── docs/guia_etiquetado_v4.md      # Guía de etiquetado
 │
 ├── 📁 DATASETS
-│   ├── archivev3/                      # Dataset v3 (train/val/test)
-│   │   └── images/ + labels/
-│   │
-│   └── archive2_auto/                  # Dataset automatizado v2
-│       ├── train/                      # Imágenes y etiquetas de entrenamiento
-│       ├── val/                        # Validación
-│       └── test/                       # Pruebas
+│   └── datasets/cctv_epp_v4/           # Dataset v4 activo (person, helmet, vest)
+│       ├── train/                      # 260 imgs (70% cronológico)
+│       ├── val/                        # 74 imgs (20%)
+│       └── test/                       # 38 imgs (10%)
 │
 ├── 🔍 MONITOREO Y DEBUG
-│   ├── check_gpu.py                    # Verificar CUDA y GPU disponible
-│   ├── check_training_progress.py      # Monitor de progreso de entrenamiento
-│   ├── monitor_training.py             # Monitor de recursos (CPU/GPU/RAM)
-│   ├── monitor_gpu_training.py         # Monitoreo específico GPU
-│   └── debug_import.py                 # Debug de imports
+│   └── check_gpu.py                    # Verificar CUDA y GPU disponible
 │
 ├── 🚀 SCRIPTS DE EJECUCIÓN
 │   ├── scripts/
-│   │   ├── start_training_detached.ps1 # ⭐ Lanza entrenamiento en ventana separada
-│   │   ├── train_archive2_auto.ps1     # Script entrenamiento archive2_auto
+│   │   ├── start_training_detached.ps1 # Lanza entrenamiento en ventana separada
 │   │   ├── start_streamlit.ps1         # Inicia app web
 │   │   ├── check_streamlit.ps1         # Verifica estado streamlit
 │   │   ├── restart_streamlit.ps1       # Reinicia aplicación
@@ -104,10 +93,8 @@ epp_streamlit_app/
 ├── 📦 ARCHIVOS COMPRIMIDOS
 │   └── *.rar, *.zip                    # Backups y archivos de respaldo
 │
-└── 🗂️ CARPETA ARCHIVE
-    ├── archive/                        # Datos históricos
-    ├── archive(2)/                     # Backup datasets
-    └── archivev3/                      # Versión anterior del dataset
+└── 🗂️ DATASETS HISTÓRICOS (retirados oct 2026)
+    Se eliminaron archive/, archive(2)/ y archive2_auto/ del repo.
 ```
 
 ## 🛠️ Tecnologías Utilizadas
@@ -145,47 +132,34 @@ python check_gpu.py
 
 ## 🚀 Uso
 
-### 1️⃣ Entrenar Modelo (GPU)
+### 1️⃣ Entrenar Modelo
 
-**Opción A: Entrenamiento en ventana dedicada (Recomendado - sigue corriendo aunque cierre VS Code)**
+**Opción A (recomendada): Ultralytics HUB** — empaquetar el dataset con
+`scripts/package_hub_zip.py`, subirlo y entrenar con créditos de la
+plataforma o con la GPU local (Bring Your Own Agent).
+
+**Opción B: Entrenamiento local directo**
 
 ```powershell
-# Lanza entrenamiento con archivev3 en ventana independiente de PowerShell
-.\scripts\start_training_detached.ps1 -DataYaml "data_archivev3.yaml" -RunName "archivev3_model_gpu" -Epochs 100 -Batch 32 -Workers 0 -Device "0"
+# Fine-tune con el dataset v4
+.\.venv\Scripts\python.exe train_yolo.py --data datasets/cctv_epp_v4/data_cctv_v4.yaml --epochs 80 --model yolov8n.pt --imgsz 640 --batch 8 --device 0
 
-# O con parámetros predeterminados:
-.\scripts\start_training_detached.ps1
-```
-
-**Características:**
-- ✅ Corre en ventana separada (no afecta VS Code)
-- ✅ Actualiza encoding UTF-8 para salida legible
-- ✅ Intenta reanudar desde checkpoint si existe
-- ✅ Genera log automático con timestamp
-- ✅ Parámetros configurables por CLI
-
-**Opción B: Entrenamiento directo**
-
-```python
-# Entrenamiento con GPU (archivev3)
-python train_archivev3_gpu.py
-
-# O con script genérico
-python train_yolo.py --data data_archivev3.yaml --epochs 100 --model yolov8n.pt --batch 32 --device 0
+# O en ventana separada (sigue corriendo aunque cierre VS Code)
+.\scripts\start_training_detached.ps1 -DataYaml "datasets/cctv_epp_v4/data_cctv_v4.yaml" -RunName "cctv_v4" -Epochs 80 -Batch 8 -Device "0"
 ```
 
 **Parámetros disponibles:**
 
 | Parámetro | Valor | Descripción |
 |-----------|-------|-------------|
-| `--data` | `data_archivev3.yaml` | Archivo de configuración del dataset |
-| `--epochs` | `100` | Número de epochs de entrenamiento |
+| `--data` | `datasets/cctv_epp_v4/data_cctv_v4.yaml` | Configuración del dataset |
+| `--epochs` | `80` | Número de epochs de entrenamiento |
 | `--imgsz` | `640` | Tamaño de imagen |
-| `--batch` | `32` | Batch size (ajustar según VRAM) |
+| `--batch` | `8` | Batch size (ajustar según VRAM) |
 | `--device` | `0` | GPU device (0 = primera GPU, "cpu" = CPU) |
 | `--workers` | `0` | Workers de datos (Windows: usar 0) |
 | `--project` | `runs/train` | Directorio de salida |
-| `--name` | `archivev3_model_gpu` | Nombre del experimento |
+| `--name` | `cctv_v4` | Nombre del experimento |
 
 ### 2️⃣ Ejecutar Aplicación Web
 
@@ -214,15 +188,6 @@ streamlit run app.py
 ```bash
 # Verificar GPU disponible
 python check_gpu.py
-
-# Monitor en tiempo real (mientras entrena)
-python monitor_training.py
-
-# Monitor específico GPU
-python monitor_gpu_training.py
-
-# Verificar progreso (requiere modelo entrenándose)
-python check_training_progress.py
 ```
 
 ### 4️⃣ Inferencia Standalone
@@ -244,24 +209,23 @@ python scripts/test_camera.py
 - **Tamaño**: ~12 MB
 - **Velocidad**: ~80ms por frame (GPU)
 
-**Modelo Fine-tuned:** archivev3_model_gpu
-- **Dataset**: archivev3 (etiquetas personalizadas)
-- **Epochs**: 100
-- **Batch Size**: 32
-- **Clases**: Persona, Casco, Chaleco, Sin EPP
-- **Hardware**: GPU NVIDIA Quadro P4000
+**Modelo vigente:** exp-2.pt (entrenado en Ultralytics HUB)
+- **Dataset**: cctv_epp_v4 (person, helmet, vest)
+- **Clases**: Persona, Casco, Chaleco
+- **Hardware entrenamiento**: GPU NVIDIA en la nube (HUB)
 
-**Métricas esperadas:**
-- 🎯 **mAP@50**: ~85-92%
-- 📈 **Precisión**: ~88-95%
-- 🔍 **Recall**: ~80-90%
+**Métricas reales medidas (baseline histórico, val 114 imgs):**
+- 🎯 **mAP@50**: 0.666
+- 📈 **Precisión**: 0.792
+- 🔍 **Recall**: 0.522
+- (Objetivo de tesis: mAP@0.5 ≥ 0.90 — el baseline es la referencia a superar)
 
 ### 📁 Salidas de Entrenamiento
 
 Cada entrenamiento genera:
 
 ```
-runs/train/archivev3_model_gpu/
+runs/train/cctv_v4/
 ├── weights/
 │   ├── best.pt              # Mejor modelo (época de mínimo loss)
 │   └── last.pt              # Último checkpoint (para reanudar)
@@ -306,19 +270,14 @@ runs/train/archivev3_model_gpu/
 
 ## 📊 Datos
 
-### Datasets Disponibles
+### Dataset activo: cctv_epp_v4
 
-#### archivev3
-- **Imágenes**: ~2,000+ imágenes etiquetadas
-- **Clases**: Persona, Casco, Chaleco, Sin EPP
-- **Split**: Train/Val/Test
-- **Formato**: YOLOv8 (txt con normalizadas)
-
-#### archive2_auto
-- **Imágenes**: Conjunto automatizado
-- **Clases**: 4 (person, helmet, vest, no_protection)
-- **Generación**: Semi-automática con validación
-- **Uso**: Entrenamiento rápido y pruebas
+- **Imágenes**: 372 frames de video CCTV (3200x1800), split temporal
+  260 train / 74 val / 38 test
+- **Clases**: `person`, `helmet`, `vest` (guantes en pausa)
+- **Formato**: YOLOv8 (txt con coordenadas normalizadas)
+- **Etiquetas**: pseudo-etiquetadas con `scripts/pseudo_label_v4.py`
+  y corregidas a mano (ver `docs/guia_etiquetado_v4.md`)
 
 ## 🔍 Interpretabilidad
 
@@ -378,9 +337,7 @@ chcp 65001 | Out-Null                  # UTF-8 console
 |------|-------------|
 | `.venv/` | Entorno virtual principal |
 
-> Nota: `.venv-1`, `.venv-2`, `.venv311` y `.venv_gpu` son entornos heredados de pruebas anteriores. El flujo recomendado usa solo `.venv`.
-| `archivev3/` | Dataset v3 |
-| `archive2_auto/` | Dataset v2 automatizado |
+> Nota: el entorno recomendado es `.venv` (Python 3.13).
 | `runs/train/` | Modelos entrenados (salida) |
 | `core/` | Módulos de detección y eventos |
 | `scripts/` | Scripts de ejecución rápida |

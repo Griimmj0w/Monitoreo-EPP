@@ -22,15 +22,15 @@ Este proyecto usa **detección de objetos** con **YOLOv8** (Ultralytics). Para r
 
 Ejecuta (recomendado para quedarte solo con **persona + casco + chaleco**):
 
-- `python scripts/evaluate_model.py --model RUTA/AL/MODELO.pt --data archive_data.yaml --roc --core-only`
+- `python scripts/evaluate_model.py --model RUTA/AL/MODELO.pt --data datasets/cctv_epp_v4/data_cctv_v4.yaml --roc --core-only`
 
 Si quieres solo casco + chaleco (sin persona):
 
-- `python scripts/evaluate_model.py --model RUTA/AL/MODELO.pt --data archive_data.yaml --roc --epp-only`
+- `python scripts/evaluate_model.py --model RUTA/AL/MODELO.pt --data datasets/cctv_epp_v4/data_cctv_v4.yaml --roc --epp-only`
 
 Alternativa (filtro manual por IDs de clase):
 
-- `python scripts/evaluate_model.py --model RUTA/AL/MODELO.pt --data archive_data.yaml --roc --classes 0,7`
+- `python scripts/evaluate_model.py --model RUTA/AL/MODELO.pt --data datasets/cctv_epp_v4/data_cctv_v4.yaml --roc --classes 0,1,2`
 
 Salida:
 - En `runs/eval/exp/` (o el `--name` que elijas) se guardan los PNG.
@@ -45,7 +45,7 @@ Para evitar confusiones al revisar, en este repo se dejó como carpeta final de 
 
 - `runs/eval/core_only_eval2/`
 
-Comando usado:
+Comando usado (dataset histórico archive, ya retirado del repo):
 
 - `python scripts/evaluate_model.py --model best.pt --data archive_data.yaml --roc --core-only --name core_only_eval`
 

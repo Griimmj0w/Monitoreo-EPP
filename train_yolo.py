@@ -1,9 +1,10 @@
 r"""Small helper to train a YOLOv8 model using the ultralytics package.
 
 Usage:
-    .venv\Scripts\python.exe train_yolo.py --data data_template.yaml --epochs 50 --model yolov8n.pt
+    .venv\Scripts\python.exe train_yolo.py --data datasets/cctv_epp_v4/data_cctv_v4.yaml --epochs 50 --model yolov8n.pt
 
-Dataset: Provide data in YOLOv8 format (images + labels) and update `data_template.yaml`.
+Dataset: Provide data in YOLOv8 format (images + labels) and point --data
+to its yaml (p. ej. datasets/cctv_epp_v4/data_cctv_v4.yaml).
 """
 import argparse
 from pathlib import Path
