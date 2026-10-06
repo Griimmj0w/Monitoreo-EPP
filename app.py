@@ -17,7 +17,7 @@ from core.epp_logic import (
     suppress_negative_overlaps,
 )
 from core.id_reader import HelmetTagReader
-from core.events import EventManager, TemporalConfirmer
+from core.events import EventManager, TemporalConfirmer, StickyOkGate
 from core.media import (
     IMAGE_EXTENSIONS,
     VIDEO_EXTENSIONS,
@@ -587,6 +587,7 @@ confirmer = TemporalConfirmer(
     window=int(Config.TEMPORAL_WINDOW),
     required=int(Config.TEMPORAL_REQUIRED),
 )
+ok_gate = StickyOkGate(hold_sec=float(Config.STICKY_OK_SEC))
 
 with st.sidebar:
     st.markdown("**EPPs a detectar**")
@@ -855,9 +856,15 @@ while st.session_state.running or st.session_state.preview_enabled:
                 # en al menos TEMPORAL_REQUIRED de los ultimos TEMPORAL_WINDOW
                 # frames, para no alertar por parpadeo de deteccion.
                 if tid >= 0:
-                    effective_status = confirmer.update(tid, status)
-                    if effective_status is None:
+                    confirmed = confirmer.update(tid, status)
+                    if confirmed == STATUS_OK:
+                        ok_gate.mark_ok(tid, now_ts)
+                    if ok_gate.is_holding(tid, now_ts):
+                        # OK pegajoso: la persona ya se confirmo cumpliendo;
+                        # el parpadeo posterior no genera falsas violaciones.
                         effective_status = STATUS_OK
+                    else:
+                        effective_status = confirmed if confirmed is not None else STATUS_OK
                 else:
                     effective_status = status
 
@@ -868,7 +875,10 @@ while st.session_state.running or st.session_state.preview_enabled:
                 else:
                     box_color = (0, 0, 255)
 
-                if tid >= 0 and effective_status != STATUS_OK and events.should_emit(tid, effective_status):
+                # Solo se registra la TRANSICION OK -> violacion (evita
+                # sobre-registro: una falta continua genera un unico evento).
+                prev_status = st.session_state.track_status.get(tid, {}).get("status", STATUS_OK)
+                if tid >= 0 and prev_status == STATUS_OK and effective_status != STATUS_OK and events.should_emit(tid, effective_status):
                     st.session_state.events.append({
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                         "track_id": tid,
@@ -919,6 +929,7 @@ while st.session_state.running or st.session_state.preview_enabled:
             }
             st.session_state.track_status = pruned
         confirmer.prune(set(st.session_state.track_status))
+        ok_gate.prune(set(st.session_state.track_status))
         status_rows = [
             {k: v for k, v in row.items() if k != "last_seen"}
             for row in st.session_state.track_status.values()

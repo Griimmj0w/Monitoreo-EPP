@@ -23,6 +23,10 @@ class AppConfig:
     MIN_PERSON_CONF: float = 0.30  # confianza minima para evaluar a una persona
                                    # (evita alarmas por detecciones fantasma)
 
+    STICKY_OK_SEC: float = 20.0    # segundos que una persona confirmada OK se
+                                   # mantiene OK aunque la deteccion parpadee
+                                   # (0 = desactivado). Pensado para demos.
+
 config = AppConfig()
 
 # Backwards-compatible names expected by app.py
