@@ -202,7 +202,7 @@ with st.sidebar:
     st.header("Configuracion")
     model_path = st.text_input(
         "Ruta del modelo YOLOv8 (.pt)",
-        value="exp.pt"
+        value="exp-2.pt"
     )
 
 
