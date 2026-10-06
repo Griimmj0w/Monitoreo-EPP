@@ -382,41 +382,6 @@ with st.sidebar:
         help="Ajusta el ancho de la imagen mostrada sin cambiar la resolucion de deteccion.",
     )
 
-    # Dataset helper: detect 'archive' folder and prepare data yaml
-    if os.path.isdir("archive"):
-        st.markdown("**Dataset encontrado:** `archive`")
-        ds_nc = st.number_input("Numero de clases (nc)", min_value=1, max_value=50, value=2, step=1)
-        ds_names = st.text_input("Nombres de clases (separados por coma)", value="person,helmet")
-        if st.button("Preparar data_template.yaml desde 'archive'"):
-            # detect common structure
-            archive = "archive"
-            if os.path.isdir(os.path.join(archive, "train", "images")) and os.path.isdir(os.path.join(archive, "val", "images")):
-                train_p = f"{archive}/train/images"
-                val_p = f"{archive}/val/images"
-            elif os.path.isdir(os.path.join(archive, "images")):
-                train_p = f"{archive}/images"
-                val_p = f"{archive}/val/images" if os.path.isdir(os.path.join(archive, "val", "images")) else train_p
-            else:
-                # fallback to archive root
-                train_p = f"{archive}"
-                val_p = f"{archive}"
-
-            names_list = [n.strip() for n in ds_names.split(",") if n.strip()]
-            # write simple yaml
-            yaml_content = []
-            yaml_content.append(f"train: {train_p}")
-            yaml_content.append(f"val: {val_p}")
-            yaml_content.append("")
-            yaml_content.append(f"nc: {int(ds_nc)}")
-            yaml_content.append("")
-            names_str = ", ".join(f'"{n}"' for n in names_list)
-            yaml_content.append(f"names: [{names_str}]")
-
-            with open("data_template.yaml", "w", encoding="utf-8") as fh:
-                fh.write("\n".join(yaml_content))
-
-            st.success(f"data_template.yaml escrito. train={train_p} val={val_p} nc={ds_nc}")
-
 if "running" not in st.session_state:
     st.session_state.running = False
 if "events" not in st.session_state:

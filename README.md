@@ -151,10 +151,10 @@ python check_gpu.py
 
 ```powershell
 # Lanza entrenamiento con archivev3 en ventana independiente de PowerShell
-.\epp_streamlit_app\scripts\start_training_detached.ps1 -DataYaml "data_archivev3.yaml" -RunName "archivev3_model_gpu" -Epochs 100 -Batch 32 -Workers 0 -Device "0"
+.\scripts\start_training_detached.ps1 -DataYaml "data_archivev3.yaml" -RunName "archivev3_model_gpu" -Epochs 100 -Batch 32 -Workers 0 -Device "0"
 
 # O con parámetros predeterminados:
-.\epp_streamlit_app\scripts\start_training_detached.ps1
+.\scripts\start_training_detached.ps1
 ```
 
 **Características:**
@@ -197,7 +197,7 @@ python train_yolo.py --data data_archivev3.yaml --epochs 100 --model yolov8n.pt 
 streamlit run app.py
 
 # O usando PowerShell
-.\epp_streamlit_app\scripts\start_streamlit.ps1
+.\scripts\start_streamlit.ps1
 ```
 
 **Se abrirá en:** `http://localhost:8501`

@@ -39,8 +39,8 @@ con YOLOv8, tracking y una app web en Streamlit.
 
 ## Reglas de desarrollo
 
-- `app.py` (raíz) es la app vigente. `epp_streamlit_app/app.py` es legado y va a
-  retirarse; no duplicar cambios entre ambas.
+- `app.py` (raíz) es la app vigente. La app legada `epp_streamlit_app/app.py`
+  fue retirada (oct 2026); no volver a introducir una segunda app.
 - `core/` contiene la lógica (detector, asociación, eventos, epp_logic, media).
   Seguir separando lógica de UI.
 - Cambios pequeños, verificables y reversibles; un tema por commit.
