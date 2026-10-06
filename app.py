@@ -431,6 +431,8 @@ if "dashboard_state" not in st.session_state:
     st.session_state.dashboard_state = {}
 if "uploaded_media_path" not in st.session_state:
     st.session_state.uploaded_media_path = ""
+if "frame_index" not in st.session_state:
+    st.session_state.frame_index = 0
 
 # Capa de consolidacion para analisis (Power BI): un episodio por persona/estado.
 analytics = EpisodeTracker(
@@ -505,6 +507,7 @@ if load_media:
     else:
         st.session_state.running = True
         st.session_state.preview_enabled = True
+        st.session_state.frame_index = 0
 if preview_enabled and not st.session_state.running:
     st.session_state.preview_enabled = True
 elif not st.session_state.running:
@@ -691,7 +694,14 @@ def open_capture():
     selected_path = video_path.strip()
     if media_kind(selected_path) == "image":
         return StaticImageCapture(selected_path)
-    return cv2.VideoCapture(selected_path)
+    cap = cv2.VideoCapture(selected_path)
+    # Reanudar el video donde quedo si Streamlit re-ejecuto el script
+    # (p. ej. al tocar un control durante la reproduccion): evita que
+    # el video se reinicie desde el inicio en cada rerun.
+    start_idx = st.session_state.get("frame_index", 0)
+    if start_idx > 0:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_idx)
+    return cap
 
 cap = None
 if st.session_state.running or st.session_state.preview_enabled:
@@ -710,7 +720,7 @@ if st.session_state.running or st.session_state.preview_enabled:
 last_time = 0.0
 fail_count = 0
 consecutive_fails = 0
-frame_index = 0
+frame_index = st.session_state.frame_index
 
 while st.session_state.running or st.session_state.preview_enabled:
     ok, frame = cap.read()
@@ -719,6 +729,7 @@ while st.session_state.running or st.session_state.preview_enabled:
             st.info("Se termino de procesar el archivo cargado.")
             st.session_state.running = False
             st.session_state.preview_enabled = False
+            st.session_state.frame_index = 0
             break
         consecutive_fails += 1
         # Solo mostrar warning despues de varios fallos consecutivos
@@ -741,6 +752,7 @@ while st.session_state.running or st.session_state.preview_enabled:
                 break
         continue
     frame_index += 1
+    st.session_state.frame_index = frame_index
     if st.session_state.running and process_every_n > 1 and (frame_index % int(process_every_n)) != 0:
         continue
     
