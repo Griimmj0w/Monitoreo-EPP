@@ -425,8 +425,6 @@ if "preview_enabled" not in st.session_state:
     st.session_state.preview_enabled = True
 if "track_status" not in st.session_state:
     st.session_state.track_status = {}
-if "last_export_path" not in st.session_state:
-    st.session_state.last_export_path = ""
 if "dashboard_state" not in st.session_state:
     st.session_state.dashboard_state = {}
 if "uploaded_media_path" not in st.session_state:
@@ -449,7 +447,17 @@ history_placeholder = st.empty()
 st.markdown('<div class="action-panel">', unsafe_allow_html=True)
 start = st.button("Iniciar camara", key="start_camera", use_container_width=True)
 load_media = st.button("Cargar video / imagen", key="load_media", use_container_width=True)
-export_evidence = st.button("Exportar Evidencia", key="export_evidence", use_container_width=True)
+if st.session_state.events:
+    st.download_button(
+        "Exportar Evidencia",
+        data=pd.DataFrame(st.session_state.events).to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
+        file_name=f"evidence_{time.strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv",
+        key="export_evidence",
+        use_container_width=True,
+    )
+else:
+    st.button("Exportar Evidencia", key="export_evidence", disabled=True, use_container_width=True)
 stop = st.button("Detener", key="stop_camera", use_container_width=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -477,14 +485,6 @@ if preview_enabled and not st.session_state.running:
     st.session_state.preview_enabled = True
 elif not st.session_state.running:
     st.session_state.preview_enabled = False
-
-def export_events_csv():
-    export_dir = os.path.join("runs", "evidence")
-    os.makedirs(export_dir, exist_ok=True)
-    export_path = os.path.join(export_dir, f"evidence_{time.strftime('%Y%m%d_%H%M%S')}.csv")
-    pd.DataFrame(st.session_state.events).to_csv(export_path, index=False, encoding="utf-8-sig")
-    return export_path
-
 
 def render_summary_panel(state):
     persons_count = state.get("persons_count", 0)
@@ -531,13 +531,6 @@ def render_history_panel(events_list):
     </div>
     """
 
-
-if export_evidence:
-    if st.session_state.events:
-        st.session_state.last_export_path = export_events_csv()
-        st.success(f"Evidencia exportada en {st.session_state.last_export_path}")
-    else:
-        st.warning("No hay alertas para exportar.")
 
 summary_placeholder.markdown(
     render_summary_panel(
