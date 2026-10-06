@@ -27,6 +27,11 @@ class AppConfig:
                                    # mantiene OK aunque la deteccion parpadee
                                    # (0 = desactivado). Pensado para demos.
 
+    ANALYTICS_DIR: str = "runs/analytics"  # CSV consolidado por episodios (Power BI)
+    CAMERA_ID: str = ""     # identificador de camara para el CSV analitico
+                            # (vacio si no aplica; no inventar valores)
+    AREA: str = ""          # zona/area para el CSV analitico (vacio si no aplica)
+
 config = AppConfig()
 
 # Backwards-compatible names expected by app.py

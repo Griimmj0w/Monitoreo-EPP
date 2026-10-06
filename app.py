@@ -5,6 +5,7 @@ import cv2
 import pandas as pd
 import time
 import os
+from datetime import datetime
 
 from core.config import Config
 from core.detector import YoloTracker
@@ -18,6 +19,7 @@ from core.epp_logic import (
 )
 from core.id_reader import HelmetTagReader
 from core.events import EventManager, TemporalConfirmer, StickyOkGate
+from core.analytics import EpisodeTracker
 from core.media import (
     IMAGE_EXTENSIONS,
     VIDEO_EXTENSIONS,
@@ -430,6 +432,13 @@ if "dashboard_state" not in st.session_state:
 if "uploaded_media_path" not in st.session_state:
     st.session_state.uploaded_media_path = ""
 
+# Capa de consolidacion para analisis (Power BI): un episodio por persona/estado.
+analytics = EpisodeTracker(
+    out_dir=Config.ANALYTICS_DIR,
+    camera_id=Config.CAMERA_ID,
+    area=Config.AREA,
+)
+
 # Zona principal: deteccion y registro siempre visibles en la parte superior.
 # El control de tamaño modifica la proporcion de las columnas; la imagen se
 # ajusta a su columna para que nunca invada la tabla.
@@ -458,6 +467,21 @@ if st.session_state.events:
     )
 else:
     st.button("Exportar Evidencia", key="export_evidence", disabled=True, use_container_width=True)
+
+analytics_path = analytics.file_path()
+if analytics_path and os.path.isfile(analytics_path):
+    with open(analytics_path, "rb") as fh:
+        analytics_bytes = fh.read()
+    st.download_button(
+        "Descargar Analitica (Power BI)",
+        data=analytics_bytes,
+        file_name=os.path.basename(analytics_path),
+        mime="text/csv",
+        key="download_analytics",
+        use_container_width=True,
+    )
+else:
+    st.button("Descargar Analitica (Power BI)", key="download_analytics", disabled=True, use_container_width=True)
 stop = st.button("Detener", key="stop_camera", use_container_width=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -893,6 +917,20 @@ while st.session_state.running or st.session_state.preview_enabled:
                         "status": effective_status,
                         "last_seen": now_ts,
                     }
+                    # Consolidacion por track_id para el CSV analitico:
+                    # actualiza el episodio activo de esta persona.
+                    analytics.update(
+                        tid,
+                        worker_id or "",
+                        effective_status,
+                        require_helmet,
+                        require_vest,
+                        float(pconf),
+                        STATUS_OK,
+                        STATUS_NO_HELMET,
+                        STATUS_NO_VEST,
+                        datetime.fromtimestamp(now_ts),
+                    )
 
                 x1, y1, x2, y2 = pb
                 label = f"ID:{tid}"
@@ -930,6 +968,7 @@ while st.session_state.running or st.session_state.preview_enabled:
             st.session_state.track_status = pruned
         confirmer.prune(set(st.session_state.track_status))
         ok_gate.prune(set(st.session_state.track_status))
+        analytics.prune(set(st.session_state.track_status))
         status_rows = [
             {k: v for k, v in row.items() if k != "last_seen"}
             for row in st.session_state.track_status.values()
@@ -986,6 +1025,10 @@ while st.session_state.running or st.session_state.preview_enabled:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
     
     frame_slot.image(rgb, channels="RGB", width="stretch")
+
+# Cerrar episodios abiertos al terminar la captura (las personas que
+# siguen en escena quedan registradas con su duracion final).
+analytics.close_all()
 
 if cap is not None:
     cap.release()
