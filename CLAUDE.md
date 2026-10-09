@@ -32,7 +32,9 @@ con YOLOv8, tracking y una app web en Streamlit.
 
 ## Métricas y verdad científica
 
-- Baseline actual (val 114 imgs): mAP@0.5 = 0.666, P = 0.792, R = 0.522.
+- Baseline histórico (modelo 10 clases, val 114 imgs): mAP@0.5 = 0.666, P = 0.792, R = 0.522.
+- Resultado exp-3 (dataset v4, val en HUB, oct 2026): mAP@0.5 = 87.7,
+  mAP@0.5:0.95 = 44.5, P = 91.2, R = 84.3.
 - Objetivos de tesis: mAP@0.5 ≥ 0.90, ≥ 15 FPS, latencia detección→alerta ≤ 5 s.
 - **Nunca reportar métricas no medidas.** Si el README dice "esperado", no
   presentarlo como obtenido. La ROC del repo es presencia por imagen (auxiliar).
