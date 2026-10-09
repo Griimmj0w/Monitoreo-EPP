@@ -8,6 +8,18 @@ con YOLOv8, tracking y una app web en Streamlit.
 
 **Estado real: prototipo experimental / MVP de investigación (NO producción).**
 
+## Entrenamiento: dos caminos soportados
+
+- **Ultralytics HUB (usado hasta ahora)**: dataset empaquetado con
+  `scripts/package_hub_zip.py`, entrenamiento con créditos o GPU local
+  (BYOA), descarga del `.pt` resultante a la raíz del repo.
+- **Local (debe mantenerse funcional)**: `train_yolo.py` o
+  `scripts/start_training_detached.ps1` con
+  `--data datasets/cctv_epp_v4/data_cctv_v4.yaml`. Para continuar un
+  fine-tune local desde un modelo de HUB: `--model exp-3.pt`.
+  Evaluar localmente con `scripts/evaluate_model.py`.
+- Ambos caminos producen el mismo formato `.pt` y alimentan la app igual.
+
 ## Decisiones de hardware y despliegue
 
 - **Entrenamiento**: PC Windows con GPU NVIDIA (GTX 1050 Ti, 4GB VRAM; driver 582.x,
