@@ -49,7 +49,7 @@ st.markdown(
     }
 
     [data-testid="stMainBlockContainer"] {
-        padding-top: 1rem;
+        padding-top: 4rem;   /* margen para que el titulo no quede bajo la barra superior */
         padding-bottom: 1.5rem;
     }
 
