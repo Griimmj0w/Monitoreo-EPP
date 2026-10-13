@@ -348,6 +348,11 @@ with st.sidebar:
     st.markdown("---")
 
     enable_qr = st.checkbox("Leer QR en etiqueta (helmet_tag)", value=False)
+    record_demo = st.checkbox(
+        "Grabar video demo (procesado)",
+        value=True,
+        help="Graba el video con las detecciones dibujadas para descargarlo como demo.",
+    )
     preview_enabled = st.checkbox("Mostrar camara en vivo", value=False)
     show_items_without_person = st.checkbox("Mostrar items sin persona", value=False)
     show_all_dets = st.checkbox("Mostrar todas las detecciones", value=False)
@@ -398,6 +403,8 @@ if "uploaded_media_path" not in st.session_state:
     st.session_state.uploaded_media_path = ""
 if "frame_index" not in st.session_state:
     st.session_state.frame_index = 0
+if "demo_video_path" not in st.session_state:
+    st.session_state.demo_video_path = ""
 
 # Capa de consolidacion para analisis (Power BI): un episodio por persona/estado.
 analytics = EpisodeTracker(
@@ -473,6 +480,7 @@ if load_media:
         st.session_state.running = True
         st.session_state.preview_enabled = True
         st.session_state.frame_index = 0
+        st.session_state.demo_video_path = ""
 if preview_enabled and not st.session_state.running:
     st.session_state.preview_enabled = True
 elif not st.session_state.running:
@@ -686,6 +694,14 @@ last_time = 0.0
 fail_count = 0
 consecutive_fails = 0
 frame_index = st.session_state.frame_index
+
+# Grabacion del video demo (frames procesados con detecciones dibujadas)
+demo_writer = None
+demo_path = ""
+demo_out_size = None
+
+# Slot para el boton de descarga del video demo (se rellena al terminar la captura)
+demo_download_slot = st.empty()
 
 while st.session_state.running or st.session_state.preview_enabled:
     ok, frame = cap.read()
@@ -1001,11 +1017,58 @@ while st.session_state.running or st.session_state.preview_enabled:
                        (10, rgb.shape[0] - 20),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
     
+    if st.session_state.running and record_demo and media_kind(video_path.strip()) != "image":
+        if demo_writer is None:
+            h, w = frame.shape[:2]
+            if w > int(Config.DEMO_VIDEO_MAX_WIDTH):
+                scale = int(Config.DEMO_VIDEO_MAX_WIDTH) / float(w)
+                demo_out_size = (int(Config.DEMO_VIDEO_MAX_WIDTH), int(h * scale))
+            else:
+                demo_out_size = (w, h)
+            demo_path = os.path.join(
+                Config.DEMO_VIDEO_DIR,
+                f"demo_{time.strftime('%Y%m%d_%H%M%S')}.mp4",
+            )
+            os.makedirs(Config.DEMO_VIDEO_DIR, exist_ok=True)
+            demo_writer = cv2.VideoWriter(
+                demo_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                max(1, int(fps_limit)),
+                demo_out_size,
+            )
+        if demo_writer is not None and demo_writer.isOpened():
+            out_frame = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            if (out_frame.shape[1], out_frame.shape[0]) != demo_out_size:
+                out_frame = cv2.resize(out_frame, demo_out_size, interpolation=cv2.INTER_AREA)
+            demo_writer.write(out_frame)
+
     frame_slot.image(rgb, channels="RGB", width="stretch")
 
 # Cerrar episodios abiertos al terminar la captura (las personas que
 # siguen en escena quedan registradas con su duracion final).
 analytics.close_all()
+
+# Finalizar la grabacion del video demo y publicar su boton de descarga
+if demo_writer is not None:
+    demo_writer.release()
+    if demo_path:
+        st.session_state.demo_video_path = demo_path
+
+demo_path_state = st.session_state.get("demo_video_path", "")
+with demo_download_slot:
+    if demo_path_state and os.path.isfile(demo_path_state):
+        with open(demo_path_state, "rb") as fh:
+            demo_bytes = fh.read()
+        st.download_button(
+            "Descargar Video Demo",
+            data=demo_bytes,
+            file_name=os.path.basename(demo_path_state),
+            mime="video/mp4",
+            key="download_demo",
+            use_container_width=True,
+        )
+    else:
+        st.button("Descargar Video Demo", key="download_demo", disabled=True, use_container_width=True)
 
 if cap is not None:
     cap.release()

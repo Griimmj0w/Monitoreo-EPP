@@ -32,6 +32,9 @@ class AppConfig:
                             # (vacio si no aplica; no inventar valores)
     AREA: str = ""          # zona/area para el CSV analitico (vacio si no aplica)
 
+    DEMO_VIDEO_DIR: str = "runs/demo"   # carpeta del video demo grabado
+    DEMO_VIDEO_MAX_WIDTH: int = 960     # ancho maximo del video demo (limita tamaño)
+
 config = AppConfig()
 
 # Backwards-compatible names expected by app.py
