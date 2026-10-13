@@ -11,6 +11,7 @@ archive/
 archive(2)/
 archive2_auto/
 archivev3/
+datasets/
 
 # Keep only the final evaluation artifacts requested
 !runs/

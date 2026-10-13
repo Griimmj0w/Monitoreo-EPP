@@ -9,13 +9,28 @@ class AppConfig:
     CLASS_TAG: str = "tag"
 
 
-    MIN_IOU_PERSON_ITEM: float = 0.2  # casco/chaleco dentro de persona iou minimo
+    MIN_IOU_PERSON_ITEM: float = 0.05  # casco/chaleco cerca o dentro de persona
     MIN_IOU_TAG_PERSON: float = 0.2   # etiqueta con casco/persona
 
     DEFAULT_CONF: float = 0.25
     DEFAULT_IOU: float = 0.5
 
     EVENT_COOLDOWN_SEC: float = 5.0    #no spamear eventos por persona
+
+    TEMPORAL_WINDOW: int = 7    # frames de historial para confirmar un estado
+    TEMPORAL_REQUIRED: int = 5  # repeticiones minimas del estado en la ventana
+
+    MIN_PERSON_CONF: float = 0.30  # confianza minima para evaluar a una persona
+                                   # (evita alarmas por detecciones fantasma)
+
+    STICKY_OK_SEC: float = 20.0    # segundos que una persona confirmada OK se
+                                   # mantiene OK aunque la deteccion parpadee
+                                   # (0 = desactivado). Pensado para demos.
+
+    ANALYTICS_DIR: str = "runs/analytics"  # CSV consolidado por episodios (Power BI)
+    CAMERA_ID: str = ""     # identificador de camara para el CSV analitico
+                            # (vacio si no aplica; no inventar valores)
+    AREA: str = ""          # zona/area para el CSV analitico (vacio si no aplica)
 
 config = AppConfig()
 

@@ -12,8 +12,8 @@ $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $projectRoot
 
 if (-not (Test-Path ".venv")) {
-  Write-Host "Creating venv (.venv) with Python 3.11..."
-  py -3.11 -m venv .venv
+  Write-Host "Creating venv (.venv) with Python 3.13..."
+  py -3.13 -m venv .venv
 } else {
   Write-Host "Found existing .venv"
 }
@@ -23,21 +23,21 @@ Write-Host "Activating venv..."
 
 Write-Host "Checking Python version..."
 $pyVersion = python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-if ($pyVersion -ne "3.11") {
-  Write-Host "ERROR: This project requires Python 3.11. Detected $pyVersion." -ForegroundColor Red
-  Write-Host "Please install Python 3.11 from python.org and recreate the venv." -ForegroundColor Yellow
+if ($pyVersion -ne "3.13") {
+  Write-Host "ERROR: This project requires Python 3.13. Detected $pyVersion." -ForegroundColor Red
+  Write-Host "Please install Python 3.13 from python.org and recreate the venv." -ForegroundColor Yellow
   Exit 1
 }
 
 Write-Host "Upgrading pip..."
 python -m pip install --upgrade pip
 
-Write-Host "Installing PyTorch with CUDA (cu121)..."
+Write-Host "Installing PyTorch with CUDA (cu124)..."
 try {
-  pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-} catch {
-  Write-Host "cu121 failed, trying cu124..." -ForegroundColor Yellow
   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+} catch {
+  Write-Host "cu124 failed, trying cu126..." -ForegroundColor Yellow
+  pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 }
 
 Write-Host "Installing project requirements..."

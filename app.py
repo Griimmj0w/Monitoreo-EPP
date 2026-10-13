@@ -5,12 +5,30 @@ import cv2
 import pandas as pd
 import time
 import os
+from datetime import datetime
 
-from core.config import Config, CONFIG
+from core.config import Config
 from core.detector import YoloTracker
-from core.association import split_detections, associate_items_to_persons, iou as bbox_iou
+from core.association import split_detections, associate_items_to_persons
+from core.epp_logic import (
+    HELMET_KEYS,
+    VEST_KEYS,
+    pick_classes as _pick_classes,
+    pick_one as _pick_one,
+    suppress_negative_overlaps,
+)
 from core.id_reader import HelmetTagReader
-from core.events import EventManager
+from core.events import EventManager, TemporalConfirmer, StickyOkGate
+from core.analytics import EpisodeTracker
+from core.media import (
+    IMAGE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    StaticImageCapture,
+    media_kind,
+    resize_for_inference,
+    safe_upload_name,
+    scale_detections,
+)
 
 
 st.set_page_config(page_title="Monitoreo Inteligente de EPP", layout="wide")
@@ -186,11 +204,11 @@ with st.sidebar:
     st.header("Configuracion")
     model_path = st.text_input(
         "Ruta del modelo YOLOv8 (.pt)",
-        value="runs/detect/runs/train/css_v28_plus/weights/best.pt"
+        value="exp-3.pt"
     )
 
 
-    source_type = st.selectbox("Fuente", ["Webcam", "RTSP", "Video (archivo)"])
+    source_type = st.selectbox("Fuente", ["Webcam", "RTSP", "Video / imagen (archivo)"])
 
     rstp_url = ""
     video_path = ""
@@ -266,14 +284,35 @@ with st.sidebar:
                 cam_desc = "integrada" if cam_index == 0 else f"externa USB (indice {cam_index})"
                 st.success(f"[OK] Camara {cam_desc} funcionando!")
                 st.caption("Si esta NO es la camara correcta, selecciona otra de la lista arriba")
-                st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
+                st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB", width="stretch")
             else:
                 st.error(f"[ERROR] No se pudo leer la camara {cam_index}. Prueba otro indice o backend.")
             cap_test.release()
     elif source_type == "RTSP":
         rstp_url = st.text_input("URL RTSP", value="rtsp://username:password@ip_address:port/stream")
     else:
-        video_path = st.text_input("Ruta del video", value="video.mp4")
+        uploaded_media = st.file_uploader(
+            "Subir video o imagen",
+            type=[ext.lstrip(".") for ext in sorted(VIDEO_EXTENSIONS | IMAGE_EXTENSIONS)],
+            help="Puedes subir un video grabado o una imagen para probar la deteccion de EPP.",
+        )
+        if uploaded_media is not None:
+            upload_dir = os.path.join("runs", "uploads")
+            os.makedirs(upload_dir, exist_ok=True)
+            safe_name = safe_upload_name(uploaded_media.name)
+            video_path = os.path.join(upload_dir, safe_name)
+            with open(video_path, "wb") as fh:
+                fh.write(uploaded_media.getbuffer())
+            st.session_state.uploaded_media_path = video_path
+            st.success(f"Archivo cargado: {safe_name}")
+
+        saved_upload = st.session_state.get("uploaded_media_path", "")
+        default_media_path = saved_upload if saved_upload else "video.mp4"
+        video_path = st.text_input(
+            "O escribe la ruta del video / imagen",
+            value=default_media_path,
+            help="Ejemplo: C:\\videos\\prueba.mp4 o una imagen .jpg/.png",
+        )
 
     tracker = st.selectbox("Tracker", ["botsort.yaml", "bytetrack.yaml"])
     
@@ -317,6 +356,20 @@ with st.sidebar:
 
     cooldown = st.number_input("Cooldown eventos (segundos)", min_value=0.0, max_value=60.0, value=float(Config.EVENT_COOLDOWN_SEC), step=0.5)
     fps_limit = st.number_input("FPS limite", min_value=1, max_value=60, value=10, step=1)
+    process_every_n = st.number_input(
+        "Procesar cada N frames",
+        min_value=1,
+        max_value=10,
+        value=2,
+        step=1,
+        help="Mayor valor = video mas fluido y avance mas rapido, pero menos frames analizados.",
+    )
+    inference_width = st.select_slider(
+        "Ancho maximo de inferencia",
+        options=[320, 480, 640, 800, 960, 1280],
+        value=640,
+        help="Menor valor = mas velocidad. Si pierdes cascos/chalecos pequenos, subelo a 800 o 960.",
+    )
 
     st.markdown("---")
     st.markdown("**Tamaño del visor:**")
@@ -329,41 +382,6 @@ with st.sidebar:
         help="Ajusta el ancho de la imagen mostrada sin cambiar la resolucion de deteccion.",
     )
 
-    # Dataset helper: detect 'archive' folder and prepare data yaml
-    if os.path.isdir("archive"):
-        st.markdown("**Dataset encontrado:** `archive`")
-        ds_nc = st.number_input("Numero de clases (nc)", min_value=1, max_value=50, value=2, step=1)
-        ds_names = st.text_input("Nombres de clases (separados por coma)", value="person,helmet")
-        if st.button("Preparar data_template.yaml desde 'archive'"):
-            # detect common structure
-            archive = "archive"
-            if os.path.isdir(os.path.join(archive, "train", "images")) and os.path.isdir(os.path.join(archive, "val", "images")):
-                train_p = f"{archive}/train/images"
-                val_p = f"{archive}/val/images"
-            elif os.path.isdir(os.path.join(archive, "images")):
-                train_p = f"{archive}/images"
-                val_p = f"{archive}/val/images" if os.path.isdir(os.path.join(archive, "val", "images")) else train_p
-            else:
-                # fallback to archive root
-                train_p = f"{archive}"
-                val_p = f"{archive}"
-
-            names_list = [n.strip() for n in ds_names.split(",") if n.strip()]
-            # write simple yaml
-            yaml_content = []
-            yaml_content.append(f"train: {train_p}")
-            yaml_content.append(f"val: {val_p}")
-            yaml_content.append("")
-            yaml_content.append(f"nc: {int(ds_nc)}")
-            yaml_content.append("")
-            names_str = ", ".join(f'"{n}"' for n in names_list)
-            yaml_content.append(f"names: [{names_str}]")
-
-            with open("data_template.yaml", "w", encoding="utf-8") as fh:
-                fh.write("\n".join(yaml_content))
-
-            st.success(f"data_template.yaml escrito. train={train_p} val={val_p} nc={ds_nc}")
-
 if "running" not in st.session_state:
     st.session_state.running = False
 if "events" not in st.session_state:
@@ -374,10 +392,19 @@ if "preview_enabled" not in st.session_state:
     st.session_state.preview_enabled = True
 if "track_status" not in st.session_state:
     st.session_state.track_status = {}
-if "last_export_path" not in st.session_state:
-    st.session_state.last_export_path = ""
 if "dashboard_state" not in st.session_state:
     st.session_state.dashboard_state = {}
+if "uploaded_media_path" not in st.session_state:
+    st.session_state.uploaded_media_path = ""
+if "frame_index" not in st.session_state:
+    st.session_state.frame_index = 0
+
+# Capa de consolidacion para analisis (Power BI): un episodio por persona/estado.
+analytics = EpisodeTracker(
+    out_dir=Config.ANALYTICS_DIR,
+    camera_id=Config.CAMERA_ID,
+    area=Config.AREA,
+)
 
 # Zona principal: deteccion y registro siempre visibles en la parte superior.
 # El control de tamaño modifica la proporcion de las columnas; la imagen se
@@ -396,7 +423,32 @@ history_placeholder = st.empty()
 st.markdown('<div class="action-panel">', unsafe_allow_html=True)
 start = st.button("Iniciar camara", key="start_camera", use_container_width=True)
 load_media = st.button("Cargar video / imagen", key="load_media", use_container_width=True)
-export_evidence = st.button("Exportar Evidencia", key="export_evidence", use_container_width=True)
+if st.session_state.events:
+    st.download_button(
+        "Exportar Evidencia",
+        data=pd.DataFrame(st.session_state.events).to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
+        file_name=f"evidence_{time.strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv",
+        key="export_evidence",
+        use_container_width=True,
+    )
+else:
+    st.button("Exportar Evidencia", key="export_evidence", disabled=True, use_container_width=True)
+
+analytics_path = analytics.file_path()
+if analytics_path and os.path.isfile(analytics_path):
+    with open(analytics_path, "rb") as fh:
+        analytics_bytes = fh.read()
+    st.download_button(
+        "Descargar Analitica (Power BI)",
+        data=analytics_bytes,
+        file_name=os.path.basename(analytics_path),
+        mime="text/csv",
+        key="download_analytics",
+        use_container_width=True,
+    )
+else:
+    st.button("Descargar Analitica (Power BI)", key="download_analytics", disabled=True, use_container_width=True)
 stop = st.button("Detener", key="stop_camera", use_container_width=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -411,23 +463,20 @@ if load_media:
         st.warning("Selecciona 'Iniciar camara' para usar la webcam.")
     elif source_type == "RTSP" and not rstp_url.strip():
         st.warning("Ingresa una URL RTSP antes de cargar la fuente.")
-    elif source_type == "Video (archivo)" and not video_path.strip():
-        st.warning("Ingresa la ruta del video antes de cargarlo.")
+    elif source_type == "Video / imagen (archivo)" and not video_path.strip():
+        st.warning("Sube un archivo o ingresa la ruta del video / imagen antes de cargarlo.")
+    elif source_type == "Video / imagen (archivo)" and not os.path.isfile(video_path.strip()):
+        st.warning("No se encontro el archivo. Revisa la ruta o vuelve a subirlo.")
+    elif source_type == "Video / imagen (archivo)" and media_kind(video_path.strip()) == "unknown":
+        st.warning("Formato no reconocido. Usa video mp4/avi/mov/mkv/wmv/m4v o imagen jpg/png/bmp/webp.")
     else:
         st.session_state.running = True
         st.session_state.preview_enabled = True
+        st.session_state.frame_index = 0
 if preview_enabled and not st.session_state.running:
     st.session_state.preview_enabled = True
 elif not st.session_state.running:
     st.session_state.preview_enabled = False
-
-def export_events_csv():
-    export_dir = os.path.join("runs", "evidence")
-    os.makedirs(export_dir, exist_ok=True)
-    export_path = os.path.join(export_dir, f"evidence_{time.strftime('%Y%m%d_%H%M%S')}.csv")
-    pd.DataFrame(st.session_state.events).to_csv(export_path, index=False, encoding="utf-8-sig")
-    return export_path
-
 
 def render_summary_panel(state):
     persons_count = state.get("persons_count", 0)
@@ -474,13 +523,6 @@ def render_history_panel(events_list):
     </div>
     """
 
-
-if export_evidence:
-    if st.session_state.events:
-        st.session_state.last_export_path = export_events_csv()
-        st.success(f"Evidencia exportada en {st.session_state.last_export_path}")
-    else:
-        st.warning("No hay alertas para exportar.")
 
 summary_placeholder.markdown(
     render_summary_panel(
@@ -533,6 +575,11 @@ except Exception as e:
 
 tag_reader = HelmetTagReader()
 events = EventManager(cooldown_sec=float(cooldown))
+confirmer = TemporalConfirmer(
+    window=int(Config.TEMPORAL_WINDOW),
+    required=int(Config.TEMPORAL_REQUIRED),
+)
+ok_gate = StickyOkGate(hold_sec=float(Config.STICKY_OK_SEC))
 
 with st.sidebar:
     st.markdown("**EPPs a detectar**")
@@ -542,26 +589,6 @@ with st.sidebar:
             model_names = [str(v) for k, v in sorted(yolo.names.items())]
     except Exception:
         model_names = []
-
-    def _match_any(name, keywords):
-        n = name.lower()
-        return any(k in n for k in keywords)
-
-    HELMET_KEYS = ["helmet", "hardhat", "hard hat", "casco"]
-    VEST_KEYS = ["vest", "chaleco"]
-
-    def _pick_one(names, keywords, fallback):
-        for n in names:
-            if _match_any(n, keywords):
-                return n
-        return fallback if fallback in names else None
-
-    def _is_negative(name):
-        n = name.lower().replace("_", " ").replace("-", " ")
-        return n.startswith("no ") or n.startswith("sin ")
-
-    def _pick_classes(names, keywords):
-        return [n for n in names if _match_any(n, keywords) and not _is_negative(n)]
 
     cls_person = _pick_one(model_names, ["person", "persona", "worker", "trabajador"], Config.CLASS_PERSON)
     cls_tag = _pick_one(model_names, ["tag", "qr", "label", "etiqueta"], Config.CLASS_TAG)
@@ -598,21 +625,6 @@ with st.sidebar:
 
     prioritize_positive = st.checkbox("Priorizar clases positivas", value=True)
 
-def _suppress_negative_overlaps(dets, positive_names, keywords, iou_thresh=0.2):
-    if not positive_names:
-        return dets
-    pos_boxes = [d["bbox"] for d in dets if d["cls"] in positive_names]
-    if not pos_boxes:
-        return dets
-    filtered = []
-    for d in dets:
-        name = d["cls"]
-        if _is_negative(name) and _match_any(name, keywords):
-            if any(bbox_iou(d["bbox"], pb) >= iou_thresh for pb in pos_boxes):
-                continue
-        filtered.append(d)
-    return filtered
-
 def open_capture():
     if source_type == "Webcam":
         backend = cv2.CAP_ANY
@@ -644,7 +656,17 @@ def open_capture():
         return cap
     if source_type == "RTSP":
         return cv2.VideoCapture(rstp_url)
-    return cv2.VideoCapture(video_path)
+    selected_path = video_path.strip()
+    if media_kind(selected_path) == "image":
+        return StaticImageCapture(selected_path)
+    cap = cv2.VideoCapture(selected_path)
+    # Reanudar el video donde quedo si Streamlit re-ejecuto el script
+    # (p. ej. al tocar un control durante la reproduccion): evita que
+    # el video se reinicie desde el inicio en cada rerun.
+    start_idx = st.session_state.get("frame_index", 0)
+    if start_idx > 0:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_idx)
+    return cap
 
 cap = None
 if st.session_state.running or st.session_state.preview_enabled:
@@ -663,10 +685,17 @@ if st.session_state.running or st.session_state.preview_enabled:
 last_time = 0.0
 fail_count = 0
 consecutive_fails = 0
+frame_index = st.session_state.frame_index
 
 while st.session_state.running or st.session_state.preview_enabled:
     ok, frame = cap.read()
     if not ok or frame is None:
+        if source_type == "Video / imagen (archivo)":
+            st.info("Se termino de procesar el archivo cargado.")
+            st.session_state.running = False
+            st.session_state.preview_enabled = False
+            st.session_state.frame_index = 0
+            break
         consecutive_fails += 1
         # Solo mostrar warning despues de varios fallos consecutivos
         if consecutive_fails >= 3:
@@ -686,6 +715,10 @@ while st.session_state.running or st.session_state.preview_enabled:
             if fail_count >= 5:
                 st.error("No se pudo leer el frame despues de varios intentos. Revisa la fuente.")
                 break
+        continue
+    frame_index += 1
+    st.session_state.frame_index = frame_index
+    if st.session_state.running and process_every_n > 1 and (frame_index % int(process_every_n)) != 0:
         continue
     
     # Frame leido exitosamente
@@ -708,18 +741,20 @@ while st.session_state.running or st.session_state.preview_enabled:
         if filter_inference and filter_classes and class_name_to_id:
             class_ids = [class_name_to_id[n] for n in filter_classes if n in class_name_to_id]
 
+        inference_frame, scale_x, scale_y = resize_for_inference(frame, int(inference_width))
         dets = yolo.infer(
-            frame,
+            inference_frame,
             conf=float(conf),
             iou=float(iou),
             tracker=tracker,
             persist=True,
             classes=class_ids if class_ids else None,
         )
+        dets = scale_detections(dets, scale_x, scale_y)
 
         if prioritize_positive:
-            dets = _suppress_negative_overlaps(dets, cls_helmet, HELMET_KEYS)
-            dets = _suppress_negative_overlaps(dets, cls_vest, VEST_KEYS)
+            dets = suppress_negative_overlaps(dets, cls_helmet, HELMET_KEYS)
+            dets = suppress_negative_overlaps(dets, cls_vest, VEST_KEYS)
         
         # Mostrar info de debug si esta habilitado
         if debug_slot is not None:
@@ -740,7 +775,9 @@ while st.session_state.running or st.session_state.preview_enabled:
             - Detecciones por tipo: {det_summary}
             - Confianza minima (conf): {conf}
             - IOU threshold: {iou}
-            - Camara: Indice {cam_index} ({cam_backend})
+            - Fuente: {source_type if source_type != "Webcam" else f"Camara indice {cam_index} ({cam_backend})"}
+            - Procesando cada {int(process_every_n)} frame(s)
+            - Ancho inferencia: {int(inference_width)} px
             
             **Sugerencias:**
             - Si no detecta personas: Baja 'conf' a 0.25-0.30
@@ -768,7 +805,13 @@ while st.session_state.running or st.session_state.preview_enabled:
                     cv2.putText(frame, label, (x1, max(0, y1 - 8)),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
-            for tid, pb, pconfig in persons:
+            for tid, pb, pconf in persons:
+                # Solo se evaluan personas con confianza suficiente:
+                # las detecciones fantasma de persona producen falsas
+                # alarmas de EPP (no hay items que asociarles).
+                if pconf < float(Config.MIN_PERSON_CONF):
+                    continue
+
                 matched_helmets = associate_items_to_persons(
                     pb, helmets, min_iou_item)
                 matched_vests = associate_items_to_persons(
@@ -810,27 +853,67 @@ while st.session_state.running or st.session_state.preview_enabled:
                         status = STATUS_NO_HELMET if not has_helmet else STATUS_NO_VEST
                         box_color = (0, 165, 255)
 
-                if tid >= 0 and status != STATUS_OK and events.should_emit(tid, status):
+                # Confirmacion temporal: el estado solo cuenta si se repite
+                # en al menos TEMPORAL_REQUIRED de los ultimos TEMPORAL_WINDOW
+                # frames, para no alertar por parpadeo de deteccion.
+                if tid >= 0:
+                    confirmed = confirmer.update(tid, status)
+                    if confirmed == STATUS_OK:
+                        ok_gate.mark_ok(tid, now_ts)
+                    if ok_gate.is_holding(tid, now_ts):
+                        # OK pegajoso: la persona ya se confirmo cumpliendo;
+                        # el parpadeo posterior no genera falsas violaciones.
+                        effective_status = STATUS_OK
+                    else:
+                        effective_status = confirmed if confirmed is not None else STATUS_OK
+                else:
+                    effective_status = status
+
+                if effective_status == STATUS_OK:
+                    box_color = (0, 255, 0)
+                elif effective_status in (STATUS_NO_HELMET, STATUS_NO_VEST):
+                    box_color = (0, 165, 255)
+                else:
+                    box_color = (0, 0, 255)
+
+                # Solo se registra la TRANSICION OK -> violacion (evita
+                # sobre-registro: una falta continua genera un unico evento).
+                prev_status = st.session_state.track_status.get(tid, {}).get("status", STATUS_OK)
+                if tid >= 0 and prev_status == STATUS_OK and effective_status != STATUS_OK and events.should_emit(tid, effective_status):
                     st.session_state.events.append({
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                         "track_id": tid,
                         "worker_id": worker_id or "",
-                        "status": status
+                        "status": effective_status
                     })
                 if tid >= 0:
                     st.session_state.track_status[tid] = {
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                         "track_id": tid,
                         "worker_id": worker_id or "",
-                        "status": status,
+                        "status": effective_status,
                         "last_seen": now_ts,
                     }
+                    # Consolidacion por track_id para el CSV analitico:
+                    # actualiza el episodio activo de esta persona.
+                    analytics.update(
+                        tid,
+                        worker_id or "",
+                        effective_status,
+                        require_helmet,
+                        require_vest,
+                        float(pconf),
+                        STATUS_OK,
+                        STATUS_NO_HELMET,
+                        STATUS_NO_VEST,
+                        datetime.fromtimestamp(now_ts),
+                    )
 
                 x1, y1, x2, y2 = pb
                 label = f"ID:{tid}"
                 if worker_id:
                     label += f" Trabajador:{worker_id}"
-                label += f" {status}"
+                label += f" {effective_status}"
 
                 draw_status_box(frame, (x1, y1, x2, y2), label, box_color, thickness=2)
 
@@ -860,19 +943,23 @@ while st.session_state.running or st.session_state.preview_enabled:
                 if now_ts - v.get("last_seen", now_ts) <= 3.0
             }
             st.session_state.track_status = pruned
+        confirmer.prune(set(st.session_state.track_status))
+        ok_gate.prune(set(st.session_state.track_status))
+        analytics.prune(set(st.session_state.track_status))
         status_rows = [
             {k: v for k, v in row.items() if k != "last_seen"}
             for row in st.session_state.track_status.values()
         ]
         if status_rows:
             df = pd.DataFrame(status_rows).sort_values("track_id")
-            table_slot.dataframe(df, use_container_width=True, height=600)
+            table_slot.dataframe(df, width="stretch", height=600)
         else:
             table_slot.info("No hay personas detectadas.")
 
         persons_count = len(persons)
-        helmet_state = "OK" if not require_helmet or all(len(associate_items_to_persons(pb, helmets, min_iou_item)) > 0 for _, pb, _ in persons) else "FALTA"
-        vest_state = "OK" if not require_vest or all(len(associate_items_to_persons(pb, vests, min_iou_item)) > 0 for _, pb, _ in persons) else "FALTA"
+        current_statuses = [v.get("status") for v in st.session_state.track_status.values()]
+        helmet_state = "OK" if not require_helmet or not any(s in (STATUS_NO_HELMET, STATUS_NO_EPP) for s in current_statuses) else "FALTA"
+        vest_state = "OK" if not require_vest or not any(s in (STATUS_NO_VEST, STATUS_NO_EPP) for s in current_statuses) else "FALTA"
 
         if persons_count == 0:
             overall_status = "ESTADO: SIN PERSONAS"
@@ -904,7 +991,8 @@ while st.session_state.running or st.session_state.preview_enabled:
         # Agregar informacion en el frame
         cv2.putText(rgb, f"Detecciones: {len(dets)}", (10, 24),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(rgb, f"Camara: {cam_index} ({cam_backend})", (10, 54),
+        source_label = f"Camara: {cam_index} ({cam_backend})" if source_type == "Webcam" else "Archivo cargado"
+        cv2.putText(rgb, source_label, (10, 54),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         
         # Mostrar advertencia si no hay detecciones
@@ -913,7 +1001,11 @@ while st.session_state.running or st.session_state.preview_enabled:
                        (10, rgb.shape[0] - 20),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
     
-    frame_slot.image(rgb, channels="RGB", use_column_width=True)
+    frame_slot.image(rgb, channels="RGB", width="stretch")
+
+# Cerrar episodios abiertos al terminar la captura (las personas que
+# siguen en escena quedan registradas con su duracion final).
+analytics.close_all()
 
 if cap is not None:
     cap.release()

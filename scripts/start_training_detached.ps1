@@ -1,14 +1,14 @@
 param(
   [switch]$Detached,
   [switch]$Resume = $true,
-  [string]$RunName = "archive2_auto_exp",
+  [string]$RunName = "cctv_v4",
   [string]$Project = "runs/train",
   [string]$FromCheckpoint = "",
-  [string]$DataYaml = "data_archive2_auto.yaml",
+  [string]$DataYaml = "datasets/cctv_epp_v4/data_cctv_v4.yaml",
   [string]$Model = "yolov8n.pt",
-  [int]$Epochs = 50,
+  [int]$Epochs = 80,
   [int]$ImgSize = 640,
-  [int]$Batch = 16,
+  [int]$Batch = 8,
   [int]$Workers = 4,
   [string]$Device = "0"
 )
